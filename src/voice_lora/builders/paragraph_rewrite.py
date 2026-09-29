@@ -3,7 +3,7 @@ prompts, then train on the reverse direction (AI rewrite -> original).
 
 Each prompt produces a different kind of AI voice, so the model learns to undo more than one of them.
 The rewrites keep the original's order and argument, so the model learns wording and sentence-level
-voice only; structure-level voice needs a different builder (see outline_regen).
+voice only; a structure-level builder (outline_regen) was tried and not adopted, see docs/v2_experiment.md.
 """
 from __future__ import annotations
 

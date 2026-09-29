@@ -30,7 +30,7 @@ def main() -> None:
             fixed = {row["slug"]: row["split"] for row in csv.DictReader(f)}
         splits = {slug: fixed.get(slug, "train") for slug in splits}
     u = rules.get("units", {})
-    builder = get_builder(cfg.get("builder.name", "paragraph_rewrite"))
+    builder = get_builder(cfg.get("builder.name", "paragraph_rewrite"), cfg.get("builder.allow_experimental", False))
     # Builders may define their own unit (outline_regen cuts sections); the default is paragraph units.
     if hasattr(builder, "make_units"):
         cut = lambda p: builder.make_units(p, cfg)  # noqa: E731

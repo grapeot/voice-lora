@@ -48,7 +48,7 @@
 
 SFT 样本的格式对所有构造器相同：单轮 user/assistant，user 是固定指令 + 可选上文 + AI 侧文字，assistant 是作者原文。
 
-## v2：outline_regen
+## v2：outline_regen（不采用，代码在 `voice_lora/experimental/`）
 
 v1 的局限是结构层：AI 改写保留了原文的段落和论证，模型只学到措辞。v2 以"节"为单位：从原文抽出要点和事实清单，让 AI 只凭清单写出这一节，训练（AI 节 → 原文节）。设计细节和选择"节"的理由见 `skills/voice-lora/references/builders.md`。
 

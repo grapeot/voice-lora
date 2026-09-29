@@ -13,6 +13,9 @@ dependencies = [
   "sacrebleu>=2.4",
 ]
 
+[project.scripts]
+voice-lora = "voice_lora.main:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 # Training, HF inference and merging need a GPU environment with Unsloth; install it separately
@@ -38,4 +41,4 @@ ignore = ["E731"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["E402", "I001"]
-"scripts/13_compare.py" = ["E402", "I001", "E501"]
+"src/voice_lora/compare.py" = ["E501"]  # the page stylesheet

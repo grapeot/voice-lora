@@ -56,6 +56,20 @@ class VoiceClassifier:
     def p_human(self, texts: list[str]) -> np.ndarray:
         return self.clf.predict_proba(self.vec.transform(texts))[:, 1]
 
+    @classmethod
+    def from_state(cls, vocabulary: dict[str, int], idf: list[float], coef: list[float], intercept: float) -> VoiceClassifier:
+        """Rebuild a fitted classifier from its saved parameters (see classify.Detector.save)."""
+        self = cls.__new__(cls)
+        self.vec = TfidfVectorizer(analyzer="char", ngram_range=(1, 3), sublinear_tf=True, preprocessor=normalize_punct, vocabulary=vocabulary)
+        self.vec.idf_ = np.asarray(idf, dtype=float)
+        lr = LogisticRegression()
+        lr.coef_ = np.asarray([coef], dtype=float)
+        lr.intercept_ = np.asarray([intercept], dtype=float)
+        lr.classes_ = np.array([0, 1])
+        lr.n_features_in_ = len(coef)
+        self.clf = lr
+        return self
+
 
 def ai_marker_lexicon(human: list[str], ai: list[str], top: int = 300, min_count: int = 20) -> list[str]:
     """Chinese character n-grams (2-4) that AI rewrites use far more than the author, by smoothed log-odds."""

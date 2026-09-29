@@ -66,7 +66,7 @@ drafters:                        # 只有 outline_regen 用：按要点写整节
   #   run_dir: /path/to/scratch    # 每次调用一个空目录作为工作目录
 
 builder:
-  name: paragraph_rewrite        # paragraph_rewrite（v1，段落级）或 outline_regen（v2，节级：先 extract 要点，再 draft 整节）
+  name: paragraph_rewrite        # 唯一推荐的构造器。outline_regen（v2，节级）不采用，只为复现保留，需另设 allow_experimental: true，见 docs/v2_experiment.md
   sections: {target_chars: 900, max_paras: 6, min_tail: 300}   # 仅 outline_regen
   prompts: [default, formal, style_mimic, expand, condense]
   style_exemplars:               # style_mimic 用的"目标 AI 文风"示例文章，最好就是你之后要改写的那类文章

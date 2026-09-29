@@ -26,6 +26,14 @@
 - API 调用失败时透传 HTTP 状态、finish_reason 和响应片段（此前只报 `KeyError: 'message'`）。
 - 列表编号（"1) … 2) …"）不再算作必须保留的数字：Gemini 常把列表改成行文，此前被误判为丢事实。
 
+### CLI 重构
+
+- 使用侧收成一个命令行工具 `voice-lora`（`rewrite`、`compare`、`score`、`check`、`fit`、`card`），逻辑搬进 `src/voice_lora/{rewrite,compare,classify,main}.py`；`08_rewrite.py`、`13_compare.py`、`15_classifier.py` 变成薄壳，参数不变。训练流水线仍是编号脚本（实验运行和只能在 GPU 环境跑的步骤）。
+- 模型卡（`card.example.yaml`）：服务地址、模型 id、训练时的指令和采样参数。调用方只认模型卡，不再需要训练 config；`voice-lora card` 从 config 生成，指令不会和训练时不一致。
+- 分类器可以存成 JSON（词表、idf、系数、AI 腔词表、作者称呼），加载后结果和现训的一致。
+- `outline_regen` 挪到 `voice_lora/experimental/`，需要 `builder.allow_experimental: true` 才能用。
+- 回归：重构前后，对照页 HTML 逐字节相同，`15_classifier.py score/check` 输出相同。
+
 ## Lessons Learned
 
 - 每个目标段落对应多条改写时，验证 loss 很早见底；1 epoch 起输出会"过头"。默认 0.5 epoch。
