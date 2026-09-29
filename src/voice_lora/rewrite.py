@@ -4,7 +4,12 @@ A model card says how to call one deployed model: where it is served, its identi
 instruction it was trained with (the prompt must match training). The sampling defaults are part of
 calling it correctly, so every caller should go through `request_body` instead of building requests:
 - greedy decoding mostly copies the input (16 of 40 paragraphs came back unchanged in one article);
-- LM Studio ignores vLLM's `repetition_penalty` key and silently applies its own default, so both keys are sent.
+- LM Studio ignores vLLM's `repetition_penalty` key and silently applies its own default, so both keys are sent;
+- the penalty must cover the whole prompt. vLLM applies it to every prompt and output token, which keeps the model
+  from copying its input; llama.cpp only looks at the last `repeat_last_n` tokens (64 by default), and the same
+  1.05 then barely acts. `repeat_last_n` is sent so llama-server matches vLLM (paragraph similarity to the input
+  0.78 on both, vs 0.85 with the default window). LM Studio does not pass `repeat_last_n` through, so it cannot
+  serve this model faithfully; use llama-server for GGUF files.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ from .config import Config
 from .pairs import user_message
 
 DEFAULT_SAMPLING = {"temperature": 0.7, "top_p": 0.95, "repetition_penalty": 1.05}
+PENALTY_WINDOW = 4096  # tokens; covers instruction + previous paragraph + paragraph with room to spare
 
 
 @dataclass
@@ -71,7 +77,7 @@ def request_body(card: ModelCard, text: str, prev: str = "", sampling: dict[str,
     s = {**DEFAULT_SAMPLING, **card.sampling, **(sampling or {})}
     penalty = s.pop("repetition_penalty")
     return {"model": card.model, "messages": [{"role": "user", "content": user_message(card.instruction, text, prev)}],
-            **s, "repetition_penalty": penalty, "repeat_penalty": penalty,
+            **s, "repetition_penalty": penalty, "repeat_penalty": penalty, "repeat_last_n": PENALTY_WINDOW,
             "max_tokens": min(2048, int(len(text) * 1.6) + 64), "chat_template_kwargs": {"enable_thinking": False}}
 
 
