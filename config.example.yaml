@@ -37,18 +37,25 @@ rewriter:                        # 任何 OpenAI 兼容接口，用来把原文�
   sampling: {temperature: 1.0, top_p: 0.95}
   extra_body: {}                 # 例如关闭思考：{"chat_template_kwargs": {"enable_thinking": false}}
 
-drafter:                         # 只有 outline_regen 用：按要点写整节的模型，最好就是以后起草文章的那类模型
-  kind: openai                   # openai：OpenAI 兼容接口（字段同 rewriter）；command：调用命令行 agent，见下
-  base_url: http://localhost:8000/v1
-  model: your-drafter-model
-  concurrency: 6
-  # kind: command
-  # command: ["your-agent-cli", "--print", "Read {prompt_file} and follow it exactly."]
-  # output_file: output.txt
-  # prompt_suffix: "把结果写入 {output_file}，只写正文。"
-  # timeout_s: 600
-  # concurrency: 10
-  # run_dir: /path/to/scratch    # 每次调用一个空目录作为工作目录
+drafters:                        # 只有 outline_regen 用：按要点写整节的模型，可以列多个，每节每个模型各写若干候选
+  - name: main                   # 第一个模型的候选用原始 prompt id（draft_style），其余加后缀（draft_style@second）
+    base_url: http://localhost:8000/v1
+    model: your-drafter-model
+    api_key_env: DRAFTER_API_KEY
+    concurrency: 16
+    extra_body: {}               # 例如 {reasoning_effort: low} 或 {thinking: {type: disabled}}
+    prompts: [draft_default, draft_style, draft_formal]
+  # - name: second               # 第二个模型，写法同上
+  #   ...
+  # 命令行 agent 也可以当 drafter：
+  # - name: cli
+  #   kind: command
+  #   command: ["your-agent-cli", "--print", "Read {prompt_file} and follow it exactly."]
+  #   output_file: output.txt
+  #   prompt_suffix: "把结果写入 {output_file}，只写正文。"
+  #   timeout_s: 600
+  #   concurrency: 10
+  #   run_dir: /path/to/scratch    # 每次调用一个空目录作为工作目录
 
 builder:
   name: paragraph_rewrite        # paragraph_rewrite（v1，段落级）或 outline_regen（v2，节级：先 extract 要点，再 draft 整节）

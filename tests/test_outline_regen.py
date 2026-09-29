@@ -37,3 +37,16 @@ def test_command_client_runs_in_its_own_dir(tmp_path):
     res = asyncio.run(client.complete(None, [{"role": "user", "content": "你好世界！"}], job_id="a#s00_draft"))
     assert res["text"] == "你好世界"
     assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_multiple_drafters_get_suffixed_prompt_ids(tmp_path):
+    from voice_lora.config import Config
+
+    cfg = Config(raw={"workdir": str(tmp_path / "w"), "drafters": [
+        {"name": "a", "base_url": "http://localhost:1/v1", "model": "m1", "prompts": ["draft_default", "draft_style"]},
+        {"name": "b", "base_url": "http://localhost:2/v1", "model": "m2", "prompts": ["draft_formal"]},
+    ]}, base_dir=tmp_path)
+    units = [{"unit_id": "p#s00", "text": "原文", "prev": ""}]
+    jobs = orr.make_jobs(cfg, units, {"p#s00|draft_default"}, stage="draft", outlines={"p#s00": "要点：1. x"})
+    assert [(j["prompt_id"], j["drafter"]) for j in jobs] == [("draft_style", "a"), ("draft_formal@b", "b")]
+    assert orr.base_prompt("draft_formal@b") == "draft_formal"

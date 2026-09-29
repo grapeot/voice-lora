@@ -39,10 +39,11 @@ DRAFT_PROMPTS = {
         "下面先给出两段示例文字，然后是一节文章的要点和事实清单。"
         "请模仿示例的文风（用词、句式、节奏），据此写出这一节的正文，约 {n} 字，自己决定怎么分段、怎么组织。"
     ),
+    "draft_formal": "下面是一节文章的要点和事实清单。请据此写出这一节适合正式发表的正文，约 {n} 字，措辞规范、表达严谨，自己决定怎么分段、怎么组织。",
 }
 DRAFT_RULES = "要求：只能使用清单里的事实，不要增加清单以外的数字、人名、机构或例子；要点都要写到；不要标题，不要解释，只输出正文。"
 
-EVAL_PREFERENCE = ["draft_style", "draft_default"]
+EVAL_PREFERENCE = ["draft_style", "draft_default", "draft_formal"]
 
 
 def make_units(post: Post, cfg: Config) -> list[Unit]:
@@ -61,6 +62,27 @@ def _numbers(text: str, skip_list_markers: bool = False) -> set[str]:
     return {f"{float(n.replace(',', '')):g}" for n in GROUPED_NUM_RE.findall(text)}
 
 
+def drafters(cfg: Config) -> list[dict]:
+    """The drafting models: `drafters` (a list, each with a `name`) or a single `drafter` section.
+    Drafts from the first drafter keep plain prompt ids (draft_style); later ones get "@name" (draft_style@deepseek)."""
+    if cfg.get("drafters"):
+        items = [dict(d) for d in cfg.get("drafters")]
+    else:
+        items = [{"name": "drafter", **(cfg.get("drafter") or cfg["rewriter"])}]
+    default_prompts = cfg.get("builder.prompts", list(DRAFT_PROMPTS))
+    for i, d in enumerate(items):
+        d["suffix"] = "" if i == 0 else f"@{d['name']}"
+        d.setdefault("prompts", default_prompts)
+        unknown = [p for p in d["prompts"] if p not in DRAFT_PROMPTS]
+        if unknown:
+            raise ValueError(f"unknown draft prompts {unknown}; choose from {list(DRAFT_PROMPTS)}")
+    return items
+
+
+def base_prompt(prompt_id: str) -> str:
+    return prompt_id.split("@", 1)[0]
+
+
 def make_jobs(cfg: Config, units: list[dict], done: set[str], stage: str = "draft", outlines: dict[str, str] | None = None) -> list[dict]:
     if stage == "extract":
         return [{"unit_id": u["unit_id"], "prompt_id": "extract", "unit": u} for u in units if f"{u['unit_id']}|extract" not in done]
@@ -70,12 +92,18 @@ def make_jobs(cfg: Config, units: list[dict], done: set[str], stage: str = "draf
     missing = [u["unit_id"] for u in units if u["unit_id"] not in outlines]
     if missing:
         raise ValueError(f"{len(missing)} sections have no outline yet (e.g. {missing[0]}); run --stage extract first")
-    prompt_ids = cfg.get("builder.prompts", list(DRAFT_PROMPTS))
-    return [{"unit_id": u["unit_id"], "prompt_id": p, "unit": u, "outline": outlines[u["unit_id"]]}
-            for u in units for p in prompt_ids if f"{u['unit_id']}|{p}" not in done]
+    jobs = []
+    for d in drafters(cfg):
+        for u in units:
+            for p in d["prompts"]:
+                pid = p + d["suffix"]
+                if f"{u['unit_id']}|{pid}" not in done:
+                    jobs.append({"unit_id": u["unit_id"], "prompt_id": pid, "drafter": d["name"], "unit": u, "outline": outlines[u["unit_id"]]})
+    return jobs
 
 
 def build_draft_messages(unit: dict, prompt_id: str, outline: str, style_pool: list[str]) -> list[dict]:
+    prompt_id = base_prompt(prompt_id)
     parts = [DRAFT_PROMPTS[prompt_id].format(n=len(unit["text"])), DRAFT_RULES]
     if prompt_id == "draft_style":
         if len(style_pool) < 2:
@@ -88,26 +116,34 @@ def build_draft_messages(unit: dict, prompt_id: str, outline: str, style_pool: l
 
 
 def make_worker(cfg: Config, _client_unused, style_pool: list[str], stage: str = "draft"):
-    """`extract` uses the `rewriter` section; `draft` uses the `drafter` section (falls back to rewriter)."""
+    """`extract` uses the `rewriter` section; `draft` uses each drafter's own client and concurrency."""
+    import asyncio
+
     if stage == "extract":
-        client = ChatClient(cfg["rewriter"])
+        clients = {"extract": ChatClient(cfg["rewriter"])}
     else:
-        section = cfg.get("drafter") or cfg["rewriter"]
-        run_root = cfg.path(section["run_dir"]) if section.get("run_dir") else cfg.work("command_runs", "x").parent
-        client = make_client(section, run_root)
+        clients = {}
+        for d in drafters(cfg):
+            run_root = cfg.path(d["run_dir"]) if d.get("run_dir") else cfg.work("command_runs", "x").parent
+            clients[d["name"]] = make_client(d, run_root)
+    limits = {name: asyncio.Semaphore(c.concurrency) for name, c in clients.items()}
 
     async def worker(http: httpx.AsyncClient, job: dict) -> dict:
         unit = job["unit"]
+        name = "extract" if stage == "extract" else job["drafter"]
+        client = clients[name]
         if stage == "extract":
             messages = [{"role": "user", "content": f"{EXTRACT_PROMPT}\n\n【文章】\n{unit['text']}"}]
         else:
             messages = build_draft_messages(unit, job["prompt_id"], job["outline"], style_pool)
         kwargs = {"job_id": f"{unit['unit_id']}_{job['prompt_id']}"} if not isinstance(client, ChatClient) else {}
-        res = await client.complete(http, messages, max_tokens=min(4096, 3 * len(unit["text"]) + 400), **kwargs)
+        async with limits[name]:
+            res = await client.complete(http, messages, max_tokens=min(4096, 3 * len(unit["text"]) + 400), **kwargs)
         key = "outline" if stage == "extract" else "rewrite"
-        return {"unit_id": unit["unit_id"], "prompt_id": job["prompt_id"], key: res["text"], "usage": res.get("usage", {})}
+        return {"unit_id": unit["unit_id"], "prompt_id": job["prompt_id"], key: res["text"], "usage": res.get("usage", {}),
+                "source": getattr(client, "model", None) or "command"}
 
-    worker.concurrency = client.concurrency  # type: ignore[attr-defined]
+    worker.concurrency = sum(c.concurrency for c in clients.values())  # type: ignore[attr-defined]
     return worker
 
 
@@ -162,7 +198,7 @@ def build(cfg: Config, units: list[dict], rewrites: list[dict]) -> tuple[dict[st
     eval_inputs = []
     for uid in sorted(by_unit):
         options = by_unit[uid]
-        r = next((options[p] for p in EVAL_PREFERENCE if p in options), next(iter(options.values())))
+        r = next((options[p] for p in EVAL_PREFERENCE if p in options), next(iter(options.values())))  # first drafter first
         u = by_id[uid]
         eval_inputs.append({"unit_id": uid, "prompt_id": r["prompt_id"], "ai_text": r["rewrite"], "prev": u["prev"], "original": u["text"]})
     return examples, eval_inputs, reasons
