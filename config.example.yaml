@@ -36,6 +36,14 @@ rewriter:                        # 任何 OpenAI 兼容接口，用来把原文�
   concurrency: 6
   sampling: {temperature: 1.0, top_p: 0.95}
   extra_body: {}                 # 例如关闭思考：{"chat_template_kwargs": {"enable_thinking": false}}
+# rewriters:                     # 可选：paragraph_rewrite 用多个改写模型时改用列表，替代上面的 rewriter
+#   - name: local                  # 第一个模型的改写用原始 prompt id（style_mimic），其余加后缀（style_mimic@second）
+#     base_url: http://localhost:8000/v1
+#     model: your-rewriter-model
+#   - name: second
+#     base_url: https://api.example.com/v1
+#     model: another-family-model
+#     prompts: [default, formal, style_mimic]   # 每个模型可以只用部分 prompt
 
 drafters:                        # 只有 outline_regen 用：按要点写整节的模型，可以列多个，每节每个模型各写若干候选
   - name: main                   # 第一个模型的候选用原始 prompt id（draft_style），其余加后缀（draft_style@second）

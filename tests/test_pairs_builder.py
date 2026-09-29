@@ -65,3 +65,12 @@ def test_unknown_prompt_and_builder_are_rejected(tmp_path):
         get_builder("nope")
     with pytest.raises(ValueError):  # draft stage needs outlines first
         get_builder("outline_regen").make_jobs(c, [{"unit_id": "x", "text": "t"}], set(), stage="draft", outlines={})
+
+
+def test_multiple_rewriters_suffix_prompt_ids(tmp_path):
+    c = cfg(tmp_path, rewriters=[
+        {"name": "a", "base_url": "http://localhost:1/v1", "model": "m1", "prompts": ["default", "formal"]},
+        {"name": "b", "base_url": "http://localhost:2/v1", "model": "m2", "prompts": ["style_mimic"]},
+    ])
+    jobs = pr.make_jobs(c, [{"unit_id": "u#000", "text": "原文", "prev": ""}], {"u#000|default"})
+    assert [(j["prompt_id"], j["model"]) for j in jobs] == [("formal", "a"), ("style_mimic@b", "b")]
