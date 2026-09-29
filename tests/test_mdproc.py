@@ -58,3 +58,17 @@ def test_quote_right_after_text_passes_through():
     blocks = split_blocks("AI 原稿：\n> 原样保留的引用。\n> 第二行。\n\n正文段落。")
     assert [(b.rewrite, b.text) for b in blocks] == [
         (True, "AI 原稿："), (False, "> 原样保留的引用。\n> 第二行。"), (True, "正文段落。")]
+
+
+def test_fuzzy_links_are_not_cut_mid_word():
+    cases = [  # (anchor, rewritten paragraph, expected linked span): real v1.1 outputs that were cut before
+        ("芯片与前沿技术研究机构 SemiAnalysis", "认为付了这笔钱就够了。芯片与前沿技术研究机构SemiAnalysis在2026年6月做过一组实测。",
+         "芯片与前沿技术研究机构SemiAnalysis"),
+        ("SemiAnalysis 行业调研估算的转述", "没有免费午餐。据 SemiAnalysis 行业调研估算，Anthropic 大约 75% 的收入来自合同。",
+         "SemiAnalysis 行业调研估算"),
+        ("按完成任务结账", "OpenAI正在对一部分企业大客户试行按完成任务结算的模式，官方没有置评。", "按完成任务结算"),
+        ("塔夫茨大学学者 Josephine Wolff", "塔夫茨大学的学者 Josephine Wolff 强调过，历史损失数据不足以建模。", "塔夫茨大学的学者 Josephine Wolff"),
+    ]
+    for anchor, text, want in cases:
+        out, appended = restore_links(text, [(anchor, "https://example.com/x")])
+        assert appended == 0 and f"[{want}](https://example.com/x)" in out, out
