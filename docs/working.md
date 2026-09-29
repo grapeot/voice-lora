@@ -19,6 +19,8 @@
 - 整篇推理支持按节改写（`--unit section`），对照页按改写单元对齐。
 - `corpus.exclude.slugs`：排除文中声明由 AI 撰写的文章。
 - outline_regen 支持多个 drafter（`drafters` 列表，后面的模型候选加 `@name` 后缀）并新增 `draft_formal`；每条候选记录 `source`。
+- v2 实验结论：不采用。真实文章上编造内容、删论点、加 AI 式格式，自动指标看不出来；复盘 `docs/v2_experiment.md`（先由 AI 起草，再用 v1 改写，人工修两处）。
+- `mdproc.split_blocks`：紧跟文字的引用块或表格单独成块、原样保留（此前"原稿：\n> 引用"会被一起送进模型改写）。
 - v2 过滤默认要求原文数字全部出现在 AI 版里（此前 0.7）：15% 的训练样本"目标比输入多数字"，模型因此在 16/74 个测试节里编数字。
 - `serve_vllm_lora.sh`：一次挂多个 LoRA checkpoint 打分（每个约 20 秒，HF generate 要 3–4 分钟）；`14_export_gguf.sh`：合并并转 GGUF 一步完成；`08_rewrite.py --skip-articles`。
 - API 调用失败时透传 HTTP 状态、finish_reason 和响应片段（此前只报 `KeyError: 'message'`）。
