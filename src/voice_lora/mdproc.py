@@ -69,7 +69,60 @@ def _best_span(text: str, anchor: str, taken: list[tuple[int, int]]) -> tuple[in
             r = SequenceMatcher(None, anchor, text[i:j], autojunk=False).ratio()
             if r > best[2]:
                 best = (i, j, r)
-    return best
+    return _refine(text, anchor, best, taken, foreign) if best[2] > 0 else best
+
+
+STOP = set("。！？；，、：,.;!?（）()「」“”\"' \n")
+
+
+def _word(ch: str) -> bool:
+    return ch.isascii() and ch.isalnum()
+
+
+def _refine(text: str, anchor: str, span: tuple[int, int, float], taken: list[tuple[int, int]], foreign: set[str]) -> tuple[int, int, float]:
+    """Move both ends of a fuzzy match to where it fits the anchor best. The coarse search only tries a few
+    window sizes, so a rewrite that adds or drops a character left links cut mid-word ("[估](..)算",
+    "[Josephine Wolf](..)f"). Ties go to spans that start and end like the anchor; a run of Latin letters
+    or digits is never split."""
+    i, j, _ = span
+    k = max(2, len(anchor) // 4)
+
+    def score(a: int, b: int) -> float:
+        r = SequenceMatcher(None, anchor, text[a:b], autojunk=False).ratio()
+        return r + 0.01 * (text[a] == anchor[0]) + 0.01 * (text[b - 1] == anchor[-1])
+
+    best, best_s = (i, j), score(i, j)
+    for a in range(max(0, i - k), min(len(text) - 1, i + k) + 1):
+        for b in range(max(a + 2, j - k), min(len(text), j + k) + 1):
+            if any(a < y and x < b for x, y in taken) or foreign & set(text[a:b]):
+                continue
+            s = score(a, b)
+            if s > best_s:
+                best, best_s = (a, b), s
+    a, b = best
+    # Anchor characters left unmatched at either end were most likely replaced by the neighbouring characters
+    # ("按完成任务结账" -> "按完成任务结算"): take in as many, stopping at punctuation or an existing link.
+    m = [x for x in SequenceMatcher(None, anchor, text[a:b], autojunk=False).get_matching_blocks() if x.size]
+    if m:
+        for _ in range(max(0, m[0].a - m[0].b)):
+            if a == 0 or text[a - 1] in STOP or any(x < a <= y for x, y in taken):
+                break
+            a -= 1
+        tail_anchor = len(anchor) - (m[-1].a + m[-1].size)
+        tail_text = (best[1] - best[0]) - (m[-1].b + m[-1].size)
+        for _ in range(max(0, tail_anchor - tail_text)):
+            if b >= len(text) or text[b] in STOP or any(x <= b < y for x, y in taken):
+                break
+            b += 1
+    while a > 0 and _word(text[a - 1]) and _word(text[a]):
+        a -= 1
+    while b < len(text) and _word(text[b]) and _word(text[b - 1]):
+        b += 1
+    while a < b and text[a].isspace():
+        a += 1
+    while b > a and text[b - 1].isspace():
+        b -= 1
+    return a, b, SequenceMatcher(None, anchor, text[a:b], autojunk=False).ratio()
 
 
 def restore_links(text: str, links: list[tuple[str, str]], min_ratio: float = 0.6) -> tuple[str, int]:
