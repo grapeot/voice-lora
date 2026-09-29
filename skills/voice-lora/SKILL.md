@@ -5,6 +5,8 @@ description: 用一位作者自己写的中文文章，训练一个把 AI 写的
 
 # voice-lora：把 AI 写的中文改成某位作者的声音
 
+本 skill 讲怎么训练和复现模型。只想用已经训练好的模型改文章，看 `skills/voice-lora-rewrite/SKILL.md`。
+
 ## 元数据
 
 - **类型**：Workflow
@@ -107,8 +109,7 @@ v1 的真实过程可以当作例子：
 - **改写会换掉链接的锚文本。** 一篇 19 个链接的文章，按原锚文本只能挂回 10 个。`restore_links` 现在按相似度把链接挂到改写后对应的片段上（不跨越锚文本里没有的标点），实在找不到就附在段末，链接一个都不丢。
 - **整篇并发和逐段串行效果一样。** 串行模式把上一段的输出作为上文，更贴近训练；并发模式用上一段的 AI 原文作为上文。v1 实测两者 P(作者) 0.29 对 0.32，差别在噪声内，默认用并发。
 - **盲评有天花板。** 作者也只认出了 17/20 段自己的真原文。"判为作者写的"达到 80% 就已经接近上限，别把 100% 当目标，也别从作者判错的单条里读出太多东西。
-- **别用 greedy，也别丢掉重复惩罚。** greedy 解码下这个模型大多在照抄输入（一篇 40 段的文章 16 段原样返回），改写靠采样：temperature 0.7、top_p 0.95、重复惩罚 1.05。LM Studio 只认 `repeat_penalty`，不认 vLLM 的 `repetition_penalty`，键名不对时悄悄用自己的默认值；`08_rewrite.py` 两个键都发。换部署后先用 `--temperature 0 --repetition-penalty 1.0 --no-guard` 在两边各跑同一篇文章，逐字对比：Q8_0 GGUF 和 bf16 vLLM 在一篇 40 段的文章上 25 段逐字相同，平均相似度 0.99。
-- **LM Studio 看不到新模型。** 模型目录里一个坏掉的软链接会让它的索引扫描中途报错退出，排在后面的模型都不会出现；`lms ls` 里看不到时，先查 `~/.lmstudio/.internal/model-index-cache.json` 的 `errors`。放模型用 `lms import`，改动后需要重启应用才会重建索引。
+- **重复惩罚要覆盖整个 prompt，别用 greedy。** 改写靠采样（temperature 0.7、top_p 0.95、重复惩罚 1.05）；greedy 下模型大多在照抄输入。要改写的原文就在 prompt 里，重复惩罚压低照抄的概率，是模型肯换说法的主要原因。vLLM 的惩罚默认覆盖全部 prompt；llama.cpp 默认只看最近 64 个 token，要在请求里带 `repeat_last_n`（同样的段落，和原文的相似度 0.849 对比覆盖全文时的 0.784）。LM Studio 既不认 `repetition_penalty`，也不传 `repeat_last_n`，所以 GGUF 要用 `llama-server` 部署。`voice-lora rewrite` 的请求体已经处理好这些。换部署后，先用 `--temperature 0 --repetition-penalty 1.0 --no-guard` 在两边各跑同一篇文章逐字对比（Q8_0 和 bf16 在 40 段里有 25 段逐字相同），再用默认参数比较和原文的平均相似度。
 - **GGUF 转换时报 `TokenizersBackend does not exist`。** 合并权重是 transformers 5.x 存的，转换环境里的 transformers 也要 ≥ 5.5。
 - **远端杀进程别用 `pkill -f`，也别在同一条命令里既 grep 进程又提到它的名字。** 通过 ssh 执行时，模式串会匹配到这条 ssh 会话自己的命令行（`grep "[x]yz"` 只能避开 grep 本身，避不开同一条命令里别处出现的 `xyz`），把会话一起杀掉。先单独查出 PID，再单独 kill。
 - **等待远端长任务时，等待条件要同时覆盖失败。** 只等成功标志的循环，在任务崩溃时会空转；v1 因此空等了一整夜。
