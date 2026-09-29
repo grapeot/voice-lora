@@ -1,6 +1,6 @@
 ---
 name: voice-lora-rewrite
-description: 用已经训练好的 voice-lora 模型，把一篇 AI 起草的中文 markdown 文章逐段改成作者的文风，并产出供人审阅的对照页。触发说法包括“voice rewrite”“voice lora 改写”“去 AI 味”“改成作者的文风”。覆盖起服务、调用、采样参数，以及改完之后必须做的事实漂移核查。模型输出不能直接当最终稿。训练和复现模型见 skills/voice-lora/SKILL.md。
+description: 用训练好的 voice-lora 模型（例如已发布的鸭哥文风模型 ai_smell_remover），把一篇 AI 起草的中文 markdown 文章逐段改成作者的文风，并产出供人审阅的对照页。触发说法包括“voice rewrite”“voice lora 改写”“去 AI 味”“改成作者的文风”。覆盖起服务、调用、采样参数，以及改完之后必须做的事实漂移核查。模型输出不能直接当最终稿。训练和复现模型见 skills/voice-lora/SKILL.md。
 ---
 
 # voice-lora-rewrite：用训练好的文风模型改一篇文章
@@ -9,8 +9,9 @@ description: 用已经训练好的 voice-lora 模型，把一篇 AI 起草的中
 
 - **类型**：Tool
 - **适用场景**：手上有一篇 AI 起草、事实已经核对过的中文 markdown 文章，想让措辞和语气更像作者本人
-- **前提**：已经按 `skills/voice-lora/SKILL.md` 训练出模型，并部署成 OpenAI 兼容的服务（GGUF 用 llama.cpp 的 `llama-server` 或者 vLLM；不要用 LM Studio，见“采样参数”）
-- **代码入口**：`voice-lora` 命令（在仓库里 `uv pip install -e .` 后可用）：`rewrite`（改写）、`compare`（对照页）、`score`（可选打分）
+- **模型**：已发布的 [ai_smell_remover](https://huggingface.co/grapeot/ai_smell_remover)（鸭哥文风，Q8_0 GGUF），或者按 `skills/voice-lora/SKILL.md` 用自己的文章训练的模型
+- **服务**：OpenAI 兼容的服务。GGUF 用 llama.cpp 的 `llama-server`，合并权重用 vLLM；不要用 LM Studio，原因见“采样参数”
+- **代码入口**：`voice-lora` 命令（`uv pip install git+https://github.com/grapeot/voice-lora`，或在仓库里 `uv pip install -e .`）：`rewrite`（改写）、`compare`（对照页）、`score`（可选打分）
 - **输出位置**：`--out` 指定的文件，同名 `.blocks.jsonl` 是逐段日志
 
 ## 它做什么，不做什么
@@ -27,22 +28,32 @@ description: 用已经训练好的 voice-lora 模型，把一篇 AI 起草的中
 
 ## 用法
 
-### 1. 确认服务在跑
+### 1. 准备模型和服务
 
-GGUF（Mac 或 NVIDIA 单机）用 llama.cpp 的 `llama-server`：
+**用已发布的鸭哥文风模型（ai_smell_remover）**，从零开始：
 
 ```bash
-llama-server -m model-Q8_0.gguf --alias <identifier> --port 8091 -c 16384 -np 4 -ngl 99 --jinja
+# 下载权重（9.1 GB）和调用卡
+hf download grapeot/ai_smell_remover ai_smell_remover-v1.1-Q8_0.gguf voice-lora-card.yaml --local-dir ./ai_smell_remover
+
+# 装 llama.cpp：Mac 用 brew install llama.cpp；Linux、Windows 用 llama.cpp 的 release 包，或者自己编译
+llama-server -m ./ai_smell_remover/ai_smell_remover-v1.1-Q8_0.gguf --alias ai_smell_remover-v1.1 \
+  --port 8091 -c 16384 -np 4 -ngl 99 --jinja
 curl -s http://127.0.0.1:8091/health          # {"status":"ok"} 即可
+
+# 装 voice-lora
+uv pip install git+https://github.com/grapeot/voice-lora
 ```
 
-`-np 4` 开 4 个并行槽位，`-c` 是 4 个槽位合计的上下文长度。
+- `-np 4` 开 4 个并行槽位，`-c` 是 4 个槽位合计的上下文长度，`-ngl 99` 把所有层放到 GPU 上。
+- 下载下来的 `voice-lora-card.yaml` 就是调用卡，已经指向上面这个服务，不用改。
+- 目前只在 Mac（M3 Ultra，Metal 后端）上测试过。llama.cpp 本身支持 Linux 和 Windows（CPU、CUDA 等后端），换平台时只需换成对应平台的 llama.cpp。9B 的 Q8_0 需要大约 10 GB 的显存或统一内存。
 
-vLLM：按 `skills/voice-lora/references/environment.md` 起服务（合并后的权重，或者基座加 `--lora-modules`）。
+**用自己训练的模型**：GGUF 同样用 `llama-server` 起服务；合并权重用 vLLM，按 `skills/voice-lora/references/environment.md` 起服务（合并后的权重，或者基座加 `--lora-modules`）。
 
-### 2. 准备模型卡
+### 2. 准备调用卡
 
-模型卡（model card）是个小 YAML，里面放着服务的地址，服务端模型的 id，训练时候用的指令和采样参数（参考 `card.example.yaml`）。用训练这个模型的 config 来生成，这样 prompt 和训练的时候一致：
+调用卡是一个小 YAML，里面写着服务地址、服务端的模型 id、训练时用的指令和采样参数（格式见 `card.example.yaml`）。用发布的模型时，直接用下载下来的 `voice-lora-card.yaml`。用自己的模型时，从训练这个模型的 config 生成，这样 prompt 和训练时一致：
 
 ```bash
 voice-lora card --config <训练时用的 config> --model <identifier> --base-url http://127.0.0.1:8091/v1 --out model.yaml
@@ -51,7 +62,7 @@ voice-lora card --config <训练时用的 config> --model <identifier> --base-ur
 ### 3. 改写
 
 ```bash
-voice-lora rewrite /path/to/article.md --card model.yaml --out /path/to/article.voice.md
+voice-lora rewrite /path/to/article.md --card voice-lora-card.yaml --out /path/to/article.voice.md
 ```
 
 - 输出是一行 JSON，其中 `units` 是改写的单元数量，`kept_original` 是被保险退回的原文段落，在审阅时需要检查。
@@ -88,7 +99,7 @@ P(作者) 只说明措辞像不像，适合比较同一篇文章改写前后，�
 
 ## 采样参数：别改
 
-模型卡和 `voice-lora rewrite` 默认 temperature 0.7、top_p 0.95、重复惩罚 1.05，惩罚覆盖整个 prompt。自己写客户端时，用 `voice_lora.rewrite.request_body` 生成请求体。
+调用卡和 `voice-lora rewrite` 默认 temperature 0.7、top_p 0.95、重复惩罚 1.05，惩罚覆盖整个 prompt。自己写客户端时，用 `voice_lora.rewrite.request_body` 生成请求体。
 
 - **重复惩罚必须覆盖整个 prompt。** 要改写的原文就在 prompt 里，惩罚压低照抄原文的概率，这是模型肯换说法的主要原因。
   - vLLM 的 `repetition_penalty` 默认就作用于全部 prompt 和输出。
@@ -125,6 +136,7 @@ P(作者) 只说明措辞像不像，适合比较同一篇文章改写前后，�
 - 仅修改发生漂移的个别字/半句，恢复为改写前的表达，其他部分保留改写后的措辞。直接在 markdown 文件上编辑，在原文中找到对应位置后进行替换。
 - 当一段中漂移过多，无法局部改回时，整段换回改写前的原文。
 - 不要让模型反复重改同一段来“碰运气”，因为每次重改都会引入新的漂移。
+- 结构和格式上的改动不要照单全收。模型偶尔会把散文段拆成列表或编号，或者加上、去掉加粗。除非明显更好，否则保留改写后的文字，把结构恢复成原稿的样子（例如把列表拼回段落），不要因为格式变了就连文字一起换回原稿。
 
 ### 3. 统一排版和前后衔接
 
