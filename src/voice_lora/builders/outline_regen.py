@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
 from collections import Counter
 
 import httpx
@@ -49,7 +50,14 @@ def make_units(post: Post, cfg: Config) -> list[Unit]:
     return make_sections(post, s.get("target_chars", 900), s.get("max_paras", 6), s.get("min_tail", 300))
 
 
-def _numbers(text: str) -> set[str]:
+# "1) ... 2) ..." or "1. ... 2. ..." enumerations: a draft that turns a list into prose drops these
+# markers without dropping any fact, so they do not count as numbers that must survive.
+LIST_MARKER_RE = re.compile(r"(?:^|(?<=[\s:：；;。，,]))\d{1,2}\s*[.)）、](?!\d)", re.M)
+
+
+def _numbers(text: str, skip_list_markers: bool = False) -> set[str]:
+    if skip_list_markers:
+        text = LIST_MARKER_RE.sub(" ", text)
     return {f"{float(n.replace(',', '')):g}" for n in GROUPED_NUM_RE.findall(text)}
 
 
@@ -112,7 +120,8 @@ def keep_draft(original: str, draft: str, ratio_range=(0.6, 1.7), min_number_cov
     no, nd = _numbers(original), _numbers(draft)
     if nd - no:
         return False, "number_invented"
-    if no and len(no & nd) / len(no) < min_number_coverage:
+    facts = _numbers(original, skip_list_markers=True)
+    if facts and len(facts & nd) / len(facts) < min_number_coverage:
         return False, "numbers_missing"
     lo = latin(original)
     invented = {w for w in latin(draft) - lo if not any(w in x or x in w for x in lo)}
