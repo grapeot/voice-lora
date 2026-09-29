@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 
 from ..config import Config
-from ..llm import ChatClient
+from ..models import ModelPool, base_prompt, model_specs
 from ..pairs import keep_rewrite, to_example
 
 COMMON_RULES = (
@@ -71,21 +71,35 @@ def build_messages(unit: dict, prompt_id: str, style_pool: list[str]) -> list[di
     return [{"role": "user", "content": "\n\n".join(parts)}]
 
 
+def rewriters(cfg: Config) -> list[dict]:
+    """`rewriters` (a list of models, each with its own prompts) or the single `rewriter` with `builder.prompts`.
+    The first model's rewrites keep plain prompt ids; later models get "@name" (see voice_lora.models)."""
+    return model_specs(cfg, "rewriters", "rewriter", cfg.get("builder.prompts", list(PROMPTS)), PROMPTS)
+
+
 def make_jobs(cfg: Config, units: list[dict], done: set[str]) -> list[dict]:
-    prompt_ids = cfg.get("builder.prompts", list(PROMPTS))
-    unknown = [p for p in prompt_ids if p not in PROMPTS]
-    if unknown:
-        raise ValueError(f"unknown prompt ids {unknown}; choose from {list(PROMPTS)}")
-    return [{"unit_id": u["unit_id"], "prompt_id": p, "unit": u} for u in units for p in prompt_ids if f"{u['unit_id']}|{p}" not in done]
+    jobs = []
+    for m in rewriters(cfg):
+        for u in units:
+            for p in m["prompts"]:
+                pid = p + m["suffix"]
+                if f"{u['unit_id']}|{pid}" not in done:
+                    jobs.append({"unit_id": u["unit_id"], "prompt_id": pid, "model": m["name"], "unit": u})
+    return jobs
 
 
-def make_worker(cfg: Config, client: ChatClient, style_pool: list[str]):
+def make_worker(cfg: Config, _client, style_pool: list[str]):
+    pool = ModelPool(cfg, rewriters(cfg))
+
     async def worker(http: httpx.AsyncClient, job: dict) -> dict:
         unit = job["unit"]
-        res = await client.complete(http, build_messages(unit, job["prompt_id"], style_pool), max_tokens=min(2048, 3 * len(unit["text"]) + 200))
+        messages = build_messages(unit, base_prompt(job["prompt_id"]), style_pool)
+        res = await pool.complete(http, job["model"], messages, max_tokens=min(2048, 3 * len(unit["text"]) + 200),
+                                  job_id=f"{unit['unit_id']}_{job['prompt_id']}")
         return {"unit_id": unit["unit_id"], "prompt_id": job["prompt_id"], "rewrite": res["text"],
-                "finish_reason": res["finish_reason"], "usage": res["usage"]}
+                "finish_reason": res.get("finish_reason"), "usage": res.get("usage", {}), "source": res["source"]}
 
+    worker.concurrency = pool.concurrency  # type: ignore[attr-defined]
     return worker
 
 
@@ -128,7 +142,8 @@ def build(cfg: Config, units: list[dict], rewrites: list[dict]) -> tuple[dict[st
     eval_inputs = []
     for uid in sorted(by_unit):
         options = by_unit[uid]
-        r = next((options[p] for p in EVAL_PREFERENCE if p in options), next(iter(options.values())))
+        ranked = sorted(options, key=lambda pid: ("@" in pid, EVAL_PREFERENCE.index(base_prompt(pid)) if base_prompt(pid) in EVAL_PREFERENCE else 99))
+        r = options[ranked[0]]
         u = by_id[uid]
         eval_inputs.append({"unit_id": uid, "prompt_id": r["prompt_id"], "ai_text": r["rewrite"], "prev": u["prev"], "original": u["text"]})
     return examples, eval_inputs, reasons

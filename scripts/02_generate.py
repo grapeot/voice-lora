@@ -48,7 +48,7 @@ def main() -> None:
     else:
         jobs = builder.make_jobs(cfg, units, done)
         worker = builder.make_worker(cfg, client, style_pool)
-        concurrency = args.concurrency or client.concurrency
+        concurrency = args.concurrency or getattr(worker, "concurrency", client.concurrency)
     print(f"stage {stage or '-'}: {len(jobs)} jobs pending, {len(done)} done, style exemplars {len(style_pool)}, concurrency {concurrency}", flush=True)
     asyncio.run(run_jobs(jobs, worker, out, concurrency))
 

@@ -33,11 +33,22 @@ def train_material(units: list[dict], rewrites: list[dict]) -> tuple[list[str], 
     return human, ai
 
 
+# Typographic variants that say nothing about voice: which quote glyph or full/half-width form a text uses
+# is an editor or keyboard setting. Left in, they were among the classifier's strongest features (the
+# author's posts use straight quotes, AI output curly ones), so swapping quotes alone raised the score.
+_PUNCT = str.maketrans({"“": '"', "”": '"', "„": '"', "＂": '"', "‘": "'", "’": "'", "＇": "'",
+                        "；": ";", "：": ":", "，": ",", "（": "(", "）": ")", "！": "!", "？": "?"})
+
+
+def normalize_punct(text: str) -> str:
+    return text.translate(_PUNCT)
+
+
 class VoiceClassifier:
-    """Char 1-3gram logistic regression: P(written by the author) vs P(AI rewrite)."""
+    """Char 1-3gram logistic regression: P(written by the author) vs P(AI rewrite), on punctuation-normalized text."""
 
     def __init__(self, human: list[str], ai: list[str]) -> None:
-        self.vec = TfidfVectorizer(analyzer="char", ngram_range=(1, 3), sublinear_tf=True, min_df=2)
+        self.vec = TfidfVectorizer(analyzer="char", ngram_range=(1, 3), sublinear_tf=True, min_df=2, preprocessor=normalize_punct)
         x = self.vec.fit_transform(human + ai)
         y = np.array([1] * len(human) + [0] * len(ai))
         self.clf = LogisticRegression(max_iter=2000, C=4.0, class_weight="balanced").fit(x, y)

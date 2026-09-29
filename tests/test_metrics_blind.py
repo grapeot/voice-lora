@@ -65,3 +65,13 @@ def test_grouped_numbers_and_paragraph_guard():
 
     safe = guarded(bad, retries=1)
     assert asyncio.run(safe(inp, "")) == inp and len(calls) == 2 and safe.guarded_log
+
+
+def test_quote_style_alone_does_not_move_the_score():
+    from voice_lora.metrics import VoiceClassifier
+
+    human = ['我觉得"这个"东西挺好用的，就是有点贵。'] * 20 + ["然后我们就去试了一下，结果还行。"] * 20
+    ai = ["鉴于“该”产品具备显著优势，笔者认为其极为实用。"] * 20 + ["此外，该方案亦具备良好的可扩展性。"] * 20
+    clf = VoiceClassifier(human, ai)
+    a, b = clf.p_human(['鉴于"该"产品具备显著优势。', "鉴于“该”产品具备显著优势。"])
+    assert abs(a - b) < 1e-9
