@@ -7,7 +7,8 @@ rewrite later), and train on (AI section -> original section). Unlike paragraph_
 the paragraphing and the argument flow inside the section, as in real AI-drafted articles.
 
 Facts are the risk: a draft that adds numbers or names teaches the model to delete facts, and one that
-drops most of them teaches it to invent. `build` filters both ways.
+drops any of the original's numbers teaches it to invent them (the target then holds numbers the input
+lacks). `build` filters both ways; list numbering ("1) ... 2) ...") is not counted as a fact.
 """
 from __future__ import annotations
 
@@ -147,7 +148,7 @@ def make_worker(cfg: Config, _client_unused, style_pool: list[str], stage: str =
     return worker
 
 
-def keep_draft(original: str, draft: str, ratio_range=(0.6, 1.7), min_number_coverage: float = 0.7, max_invented_latin: int = 1) -> tuple[bool, str]:
+def keep_draft(original: str, draft: str, ratio_range=(0.6, 1.7), min_number_coverage: float = 1.0, max_invented_latin: int = 1) -> tuple[bool, str]:
     if not draft.strip():
         return False, "empty"
     ratio = len(draft) / max(1, len(original))
@@ -170,7 +171,7 @@ def build(cfg: Config, units: list[dict], rewrites: list[dict]) -> tuple[dict[st
     by_id = {u["unit_id"]: u for u in units}
     flt = cfg.get("builder.filter", {}) or {}
     ratio = tuple(flt.get("length_ratio", [0.6, 1.7]))
-    coverage = float(flt.get("min_number_coverage", 0.7))
+    coverage = float(flt.get("min_number_coverage", 1.0))
     max_latin = int(flt.get("max_invented_latin", 1))
     kept: dict[str, list[tuple[dict, dict]]] = {"train": [], "val": [], "test": []}
     seen: set[str] = set()

@@ -64,6 +64,7 @@ def main() -> None:
     ap.add_argument("--mode", choices=["parallel", "chained"], default="parallel")
     ap.add_argument("--concurrency", type=int, default=64)
     ap.add_argument("--skip-pairs", action="store_true")
+    ap.add_argument("--skip-articles", action="store_true", help="only the held-out paragraphs/sections, e.g. to score checkpoints")
     ap.add_argument("--serve-url", help="override serve.base_url, e.g. http://localhost:1234/v1 for LM Studio")
     ap.add_argument("--serve-model", help="override serve.model")
     ap.add_argument("--unit", choices=["paragraph", "section"], default=None,
@@ -71,7 +72,7 @@ def main() -> None:
     ap.add_argument("--no-guard", action="store_true", help="keep unsafe paragraph rewrites instead of retrying / falling back to the input")
     args = ap.parse_args()
     cfg = config_from(args)
-    arts = [cfg.path(a) for a in (args.article or cfg.get("evaluate.articles", []) or [])]
+    arts = [] if args.skip_articles else [cfg.path(a) for a in (args.article or cfg.get("evaluate.articles", []) or [])]
     serve = {**cfg["serve"], **({"base_url": args.serve_url} if args.serve_url else {}), **({"model": args.serve_model} if args.serve_model else {})}
     unit = args.unit or ("section" if cfg.get("builder.name") == "outline_regen" else "paragraph")
     asyncio.run(run(cfg, args.name, arts, args.mode, args.concurrency, args.skip_pairs, serve, args.no_guard, unit))

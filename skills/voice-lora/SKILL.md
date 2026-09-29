@@ -10,7 +10,7 @@ description: 用一位作者自己写的中文文章，训练一个把 AI 写的
 - **类型**：Workflow
 - **适用场景**：有一位作者数十篇以上的中文原创文章，想得到一个本地模型，把 AI 起草的中文改成这位作者的措辞和语气
 - **输出位置**：配置文件里 `workdir` 指向的目录（默认在 gitignore 的 `local/` 下）
-- **代码入口**：`scripts/01_units.py` … `scripts/13_compare.py`，每一步都读同一个 `--config`
+- **代码入口**：`scripts/01_units.py` … `scripts/14_export_gguf.sh`，每一步都读同一个 `--config`
 
 ## 目标与边界
 
@@ -65,8 +65,8 @@ v1 的参照值（作者本人的博客，187 篇）：留出段落 P(作者) 0.
 | 过滤 | `03_build.py` | `sft_train/val.jsonl`、`eval_inputs.jsonl` | 保留率 ≥ 90% |
 | 基线 | `07_baseline_fewshot.py` | `eval/baseline_fewshot.jsonl` | 有它才能判断微调值不值 |
 | 训练 | `04_train.py`（先 `--max-steps 30` 冒烟） | `runs/<run>/` | loss 在降；每 0.25 epoch 一个 checkpoint |
-| 选点 | `05_infer_hf.py` 给候选打分 → `10_select_checkpoint.py` | `selection.json` | 见"调优" |
-| 部署 | `06_merge.py` → `serve_vllm.sh` | 合并权重、服务 | 单条请求 ~80 tok/s（9B/5090） |
+| 选点 | `serve_vllm_lora.sh` 一次挂上多个 checkpoint → `08_rewrite.py --serve-model <name> --skip-articles` 逐个打分 → `10_select_checkpoint.py` | `selection.json` | 见"调优"；每个 checkpoint 约 20 秒（`05_infer_hf.py` 也能用，但要 3–4 分钟） |
+| 部署 | `06_merge.py` → `serve_vllm.sh`；桌面端用 `14_export_gguf.sh` 一步合并并转 GGUF | 合并权重、服务、GGUF | 单条请求 ~80 tok/s（9B/5090） |
 | 评估 | `08_rewrite.py` → `09_evaluate.py` | `eval/metrics.md` | 验收标准 3、4 |
 | 盲评 | `11_blind_eval.py` → 作者 → `12_score_blind.py` | `blind/<model>/score.json` | 验收标准 5 |
 | 对照 | `13_compare.py` | `eval/articles/<stem>.<name>.compare.html` | 给作者看一篇真实文章改写前后的逐段并排 |
@@ -95,6 +95,7 @@ v1 的真实过程可以当作例子：
 
 以下都在 v1 里真实发生过：
 
+- **训练目标里不能有输入没有的事实。** 只要一部分样本的原文里带着 AI 输入里没有的数字，模型就学会"补"数字，推理时会凭空编出来。v2 第一版因此在 22% 的测试节里编了数字。构造器的过滤要保证原文的事实在输入里全部出现（`min_number_coverage: 1.0`），`09_evaluate.py` 的 `number_drift` 标记会报出这类问题。
 - **分类器指标会被 LoRA 骗过。** P(作者) 分类器和 LoRA 用的是同一批数据对，LoRA 天然会迎合它。它只能用来比较 checkpoint 和基线，不能当"像不像"的证据。
 - **留出段落好，不等于真实文章好。** v1 在留出段落上是 0.87，在真正要改的 AI 文章上只有 0.31：训练输入是"AI 改写的作者原文"，结构和论证仍是作者的；真实 AI 文章从结构到论证都是 AI 的。每一轮都要在真实目标文章上单独测。
 - **按段落切分会泄漏。** 同一段的几条改写如果分进了不同的 split，测试集就被训练集看过了。`01_units.py` 按文章切分，别改成按段落。

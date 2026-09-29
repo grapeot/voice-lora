@@ -25,6 +25,8 @@ def test_keep_draft_filters_facts_both_ways():
     assert orr.keep_draft(orig, ok) == (True, "ok")
     assert orr.keep_draft(orig, ok.replace("40%", "40%，节省了 15 天"))[1] == "number_invented"
     assert orr.keep_draft(orig, "我们动用了几台机器来训练，花了一些钱，速度快了不少，大家都很满意这个结果。")[1] == "numbers_missing"
+    # even one missing number is rejected by default: the model would learn to invent it
+    assert orr.keep_draft(orig, "我们在 2024 年动用了 3 台机器来训练，花了不少钱，速度快了 40%，很划算。")[1] == "numbers_missing"
     listed = "PhD的优势有: 1) 思维缜密，遇事冷静；2) 技术上眼界广，把层数从10层推到了1000层。"
     prose = "读博带来的好处，一是想问题缜密、遇事冷静，二是技术眼界广，把网络从10层一路推到了1000层。"
     assert orr.keep_draft(listed, prose) == (True, "ok")
