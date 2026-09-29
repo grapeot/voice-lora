@@ -16,6 +16,7 @@ class Block:
     links: list[tuple[str, str]] = field(default_factory=list)  # (anchor, url)
     plain: str = ""
     output: str = ""
+    tight: bool = False  # follows the previous block without a blank line; join_blocks keeps it that way
 
 
 def _line_kind(line: str) -> str:
@@ -23,29 +24,61 @@ def _line_kind(line: str) -> str:
     return "quote" if s.startswith(">") else "table" if s.startswith("|") else "text"
 
 
+HEADING_RE = re.compile(r"^#{1,6}\s")
+
+
 def split_blocks(md: str) -> list[Block]:
-    """Blocks are separated by blank lines; a quote or table that follows text without a blank line
-    (e.g. "原稿：" then "> ...") becomes its own block, so it passes through untouched."""
-    blocks, buf, in_fence = [], [], False
+    """Blocks are separated by blank lines. Some boundaries need no blank line, so that what follows passes
+    through untouched or gets rewritten on its own: a heading line is always a block by itself (a list right
+    under "### 适合使用" is prose, not part of the heading), a fenced code block is one block, and a quote or
+    table that follows text (e.g. "原稿：" then "> ...") starts a new block. Each block remembers whether a
+    blank line preceded it, so join_blocks puts the article back together with the same spacing."""
+    blocks: list[tuple[str, bool]] = []  # (text, tight)
+    buf: list[str] = []
+    in_fence, tight = False, False
+
+    def flush(next_tight: bool) -> None:
+        nonlocal buf, tight
+        if buf:
+            blocks.append(("\n".join(buf), tight))
+            buf = []
+            tight = next_tight
+        elif not next_tight:
+            tight = False
+
     for line in md.split("\n"):
         if line.strip().startswith("```"):
-            in_fence = not in_fence
-        if not line.strip() and not in_fence:
-            if buf:
-                blocks.append("\n".join(buf))
-                buf = []
+            if not in_fence:
+                flush(True)
+                in_fence = True
+                buf.append(line)
+            else:
+                buf.append(line)
+                in_fence = False
+                flush(True)
             continue
-        if buf and not in_fence and _line_kind(line) != _line_kind(buf[-1]):
-            blocks.append("\n".join(buf))
-            buf = []
+        if in_fence:
+            buf.append(line)
+            continue
+        if not line.strip():
+            flush(False)
+            continue
+        if HEADING_RE.match(line):
+            flush(True)
+            buf.append(line)
+            flush(True)
+            continue
+        if buf and _line_kind(line) != _line_kind(buf[-1]):
+            flush(True)
         buf.append(line)
-    if buf:
-        blocks.append("\n".join(buf))
+    flush(False)
+    if blocks:
+        blocks[0] = (blocks[0][0], False)
     out = []
-    for b in blocks:
+    for b, is_tight in blocks:
         s = b.strip()
         is_prose = not (s.startswith(PASSTHROUGH_PREFIXES) or s.startswith("```")) and re.search(r"[一-鿿]", s)
-        blk = Block(text=b, rewrite=bool(is_prose))
+        blk = Block(text=b, rewrite=bool(is_prose), tight=is_tight)
         if blk.rewrite:
             blk.links = LINK_RE.findall(b)
             blk.plain = LINK_RE.sub(r"\1", b)
@@ -150,5 +183,13 @@ def restore_links(text: str, links: list[tuple[str, str]], min_ratio: float = 0.
 
 
 def join_blocks(blocks: list[Block]) -> str:
-    """Blocks whose output is None were merged into an earlier block and are skipped."""
-    return "\n\n".join(b.output for b in blocks if b.output is not None) + "\n"
+    """Blocks whose output is None were merged into an earlier block and are skipped. A block that followed
+    its predecessor without a blank line is joined with a single newline."""
+    parts: list[str] = []
+    for b in blocks:
+        if b.output is None:
+            continue
+        if parts:
+            parts.append("\n" if b.tight else "\n\n")
+        parts.append(b.output)
+    return "".join(parts) + "\n"

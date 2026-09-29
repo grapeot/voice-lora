@@ -72,3 +72,31 @@ def test_fuzzy_links_are_not_cut_mid_word():
     for anchor, text, want in cases:
         out, appended = restore_links(text, [(anchor, "https://example.com/x")])
         assert appended == 0 and f"[{want}](https://example.com/x)" in out, out
+
+
+def test_heading_and_code_fence_split_without_blank_lines():
+    md = "## 适合使用\n- 第一条说明文字\n- 第二条说明文字\n\n说明如下：\n```bash\n# 注释\nvoice-lora score a.md\n```\n后面的正文。\n"
+    blocks = split_blocks(md)
+    assert [(b.text.split("\n")[0], b.rewrite, b.tight) for b in blocks] == [
+        ("## 适合使用", False, False), ("- 第一条说明文字", True, True), ("说明如下：", True, False),
+        ("```bash", False, True), ("后面的正文。", True, True)]
+    for b in blocks:
+        if b.rewrite:
+            b.output = b.plain
+    assert join_blocks(blocks) == md
+
+
+def test_real_documents_round_trip_unchanged():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for f in [root / "README.md", root / "docs" / "classifier.md", *sorted((root / "skills").glob("*/SKILL.md"))]:
+        md = f.read_text(encoding="utf-8").rstrip("\n") + "\n"
+        md = "\n".join(line.rstrip() for line in md.split("\n"))
+        while "\n\n\n" in md:
+            md = md.replace("\n\n\n", "\n\n")
+        blocks = split_blocks(md)
+        for b in blocks:
+            if b.rewrite:
+                b.output = b.text
+        assert join_blocks(blocks) == md, f.name
