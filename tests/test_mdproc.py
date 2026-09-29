@@ -52,3 +52,9 @@ def test_section_rewrite_merges_groups_and_keeps_headings():
         p.unlink()
     assert out.startswith("# 标题\n\n第一段，见[链接](https://example.com/x)。第二段内容。\n\n## 小节")
     assert [x["blocks"] for x in log] == [[1, 2], [4]]
+
+
+def test_quote_right_after_text_passes_through():
+    blocks = split_blocks("AI 原稿：\n> 原样保留的引用。\n> 第二行。\n\n正文段落。")
+    assert [(b.rewrite, b.text) for b in blocks] == [
+        (True, "AI 原稿："), (False, "> 原样保留的引用。\n> 第二行。"), (True, "正文段落。")]

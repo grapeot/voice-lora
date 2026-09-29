@@ -18,7 +18,14 @@ class Block:
     output: str = ""
 
 
+def _line_kind(line: str) -> str:
+    s = line.lstrip()
+    return "quote" if s.startswith(">") else "table" if s.startswith("|") else "text"
+
+
 def split_blocks(md: str) -> list[Block]:
+    """Blocks are separated by blank lines; a quote or table that follows text without a blank line
+    (e.g. "原稿：" then "> ...") becomes its own block, so it passes through untouched."""
     blocks, buf, in_fence = [], [], False
     for line in md.split("\n"):
         if line.strip().startswith("```"):
@@ -28,6 +35,9 @@ def split_blocks(md: str) -> list[Block]:
                 blocks.append("\n".join(buf))
                 buf = []
             continue
+        if buf and not in_fence and _line_kind(line) != _line_kind(buf[-1]):
+            blocks.append("\n".join(buf))
+            buf = []
         buf.append(line)
     if buf:
         blocks.append("\n".join(buf))
