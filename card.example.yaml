@@ -1,0 +1,7 @@
+# 模型卡：一个部署好的模型怎么调用。voice-lora rewrite --card <这个文件> article.md
+# 最好用 voice-lora card --config <训练用的 config> --model <服务端 id> 生成，instruction 才会和训练时一致。
+name: voice-lora-v1                       # 输出文件名里用的短名
+base_url: http://localhost:1234/v1        # LM Studio；vLLM 例如 http://localhost:8000/v1
+model: voice-lora-v1                      # 服务端的模型 identifier
+instruction: 把下面这段文字改写成作者的文风，内容和顺序不变。
+sampling: {temperature: 0.7, top_p: 0.95, repetition_penalty: 1.05}   # 默认值；别用 temperature 0，greedy 基本在照抄

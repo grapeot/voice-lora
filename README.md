@@ -112,14 +112,31 @@ cp config.example.yaml local/config.yaml
 | 候选打分 | `scripts/05_infer_hf.py` | 用候选 checkpoint 对验证集批量推理打分 | 候选输出与评分 |
 | 选检查点 | `scripts/10_select_checkpoint.py` | 识别验证 loss 回升与过头标记，推荐最佳 checkpoint | `selection.json` |
 | 权重合并 | `scripts/06_merge.py` | 合并 LoRA 权重与基座模型，便于后续高效服务 | 合并后的模型目录 |
-| 批量改写 | `scripts/08_rewrite.py` | 调用推理服务并发改写留出段落与完整目标文章 | 改写输出结果 |
+| 批量改写 | `scripts/08_rewrite.py` | 调用推理服务并发改写留出段落与完整目标文章（实验用；单篇文章用 `voice-lora rewrite`） | 改写输出结果 |
 | 指标评估 | `scripts/09_evaluate.py` | 汇总分类器得分、AI 腔词率与字级指标 | `eval/metrics.md` |
 | 准备盲评 | `scripts/11_blind_eval.py` | 生成供作者答题的盲评 HTML 页面 | 盲评答卷页面 |
 | 计算盲评 | `scripts/12_score_blind.py` | 导入作者答案并评分，给出认出率与胜率 | `score.json` |
 | 并排对照 | `scripts/13_compare.py` | 一篇文章改写前后逐段并排，标出 AI 腔词；`--name` 可给多个模型，多栏对照 | `*.compare.html` |
 | 分类器 | `scripts/15_classifier.py` | `check` 检查分类器可信度（按改写模型、段落长度）；`score` 给任意 markdown 文章打分 | `eval/classifier_check.json` |
 
-### 4. 调优说明
+### 4. 用训练好的模型：`voice-lora` 命令
+
+训练流水线之外的日常使用走一个命令行工具（`uv pip install -e .` 后可用），不依赖实验工作目录：
+
+```bash
+# 模型卡：从训练用的 config 生成，保证 prompt 里的指令和训练时一致（格式见 card.example.yaml）
+voice-lora card --config local/config.yaml --model <服务端模型 id> --base-url http://localhost:1234/v1 --out my-model.yaml
+
+voice-lora rewrite article.md --card my-model.yaml --out-dir out/         # 改写，写出 .md 和逐段日志 .blocks.jsonl
+voice-lora compare article.md out/article.<name>.md --classifier clf.json  # 原稿与改写逐段并排的 HTML
+voice-lora fit --config local/config.yaml --out clf.json                   # 把分类器存成 JSON（不用 pickle）
+voice-lora score *.md --classifier clf.json                                # 每篇文章的 P(作者) 与 AI 腔词率
+voice-lora check --config local/config.yaml                                # 分类器可信度（见 docs/classifier.md）
+```
+
+采样参数（temperature 0.7、top_p 0.95、重复惩罚 1.05）是正确调用的一部分，写在 `src/voice_lora/rewrite.py` 里：greedy 解码下模型大多在照抄输入；LM Studio 只认 `repeat_penalty`，所以两个键都发。自己写客户端时请复用 `request_body`。
+
+### 5. 调优说明
 
 `scripts/10_select_checkpoint.py` 会自动分析各 checkpoint 的指标表现，给出推荐：
 - **识别“过头”（overshoot）**：当输出比作者本人还像作者（P(作者) 显著高于原文，或 AI 腔词率过低）时打上标记。这代表模型用力过猛，产生漫画式夸张模仿。

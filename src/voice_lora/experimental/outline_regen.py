@@ -1,4 +1,4 @@
-"""v2 dataset builder: structure-level voice.
+"""v2 dataset builder: structure-level voice. EXPERIMENTAL, NOT RECOMMENDED: see voice_lora/experimental/__init__.py.
 
 Cut each of the author's articles into sections (at headings, then windows of a few paragraphs), extract an
 outline plus a fact list from each section (stage `extract`, any fast model), have an AI write that section
@@ -19,12 +19,12 @@ from collections import Counter
 
 import httpx
 
+from ..builders.paragraph_rewrite import load_style_pool  # noqa: F401  (re-exported for 02_generate)
 from ..config import Config
 from ..corpus import Post, Unit, make_sections
 from ..llm import ChatClient, make_client
 from ..metrics import GROUPED_NUM_RE
 from ..pairs import latin, to_example
-from .paragraph_rewrite import load_style_pool  # noqa: F401  (re-exported for 02_generate)
 
 STAGES = ["extract", "draft"]
 

@@ -3,8 +3,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from voice_lora.builders import outline_regen as orr
 from voice_lora.corpus import Post, make_sections
+from voice_lora.experimental import outline_regen as orr
 from voice_lora.llm import CommandClient
 
 P = "这是一段用来凑长度的中文文字，内容本身没有意义。" * 6  # ~150 chars

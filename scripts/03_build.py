@@ -10,7 +10,7 @@ from voice_lora.cli import config_from, parser
 
 def main() -> None:
     cfg = config_from(parser(__doc__).parse_args())
-    builder = get_builder(cfg.get("builder.name", "paragraph_rewrite"))
+    builder = get_builder(cfg.get("builder.name", "paragraph_rewrite"), cfg.get("builder.allow_experimental", False))
     units = jsonl.read(cfg.work("units.jsonl"))
     rewrites = jsonl.read(cfg.work("rewrites.jsonl"))
     examples, eval_inputs, reasons = builder.build(cfg, units, rewrites)

@@ -24,7 +24,7 @@ def main() -> None:
     ap.add_argument("--split", action="append", help="only units of these splits (default: all)")
     args = ap.parse_args()
     cfg = config_from(args)
-    builder = get_builder(cfg.get("builder.name", "paragraph_rewrite"))
+    builder = get_builder(cfg.get("builder.name", "paragraph_rewrite"), cfg.get("builder.allow_experimental", False))
     units = jsonl.read(cfg.work("units.jsonl"))
     if args.split:
         units = [u for u in units if u["split"] in args.split]

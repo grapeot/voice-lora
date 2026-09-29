@@ -63,8 +63,10 @@ def test_unknown_prompt_and_builder_are_rejected(tmp_path):
         pr.make_jobs(c, [{"unit_id": "x", "text": "t"}], set())
     with pytest.raises(ValueError):
         get_builder("nope")
+    with pytest.raises(ValueError, match="experimental"):  # not adopted; needs an explicit opt-in
+        get_builder("outline_regen")
     with pytest.raises(ValueError):  # draft stage needs outlines first
-        get_builder("outline_regen").make_jobs(c, [{"unit_id": "x", "text": "t"}], set(), stage="draft", outlines={})
+        get_builder("outline_regen", allow_experimental=True).make_jobs(c, [{"unit_id": "x", "text": "t"}], set(), stage="draft", outlines={})
 
 
 def test_multiple_rewriters_suffix_prompt_ids(tmp_path):
