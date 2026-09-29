@@ -34,6 +34,10 @@ def test_english_and_draft_rules(tmp_path):
     english = "This post is written entirely in English with no Chinese at all. " * 5
     assert reason(write(tmp_path, "d.md", "Date: 2019-01-01\nTags: Chinese", english)) == "not_chinese"
     assert reason(write(tmp_path, "e.md", "Title: no date")) == "no_date"
+    rules = {**RULES, "exclude": {**RULES["exclude"], "slugs": ["demo"]}}
+    p = write(tmp_path, "g.md", "Date: 2019-01-01\nSlug: demo")
+    meta, body = parse_post(p)
+    assert exclusion_reason(p, meta, body, rules) == "slug"
 
 
 def test_unclosed_fenced_frontmatter(tmp_path):

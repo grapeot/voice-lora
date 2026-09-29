@@ -1,21 +1,160 @@
-"""v2 dataset builder (not implemented yet): structure-level voice.
+"""v2 dataset builder: structure-level voice.
 
-Planned: cut each of the author's articles into sections (by heading, or windows of 3-6 paragraphs),
-extract an outline plus a fact list from each section, have an AI write that section from the outline
-alone, and train on (AI section -> original section). Unlike paragraph_rewrite, the AI side then owns the
-paragraph structure and argument flow inside the section, which is what real AI-drafted articles look
-like. See skills/voice-lora/references/builders.md.
+Cut each of the author's articles into sections (at headings, then windows of a few paragraphs), extract an
+outline plus a fact list from each section (stage `extract`, any fast model), have an AI write that section
+from the outline alone (stage `draft`, ideally the same kind of model that drafts the articles you will
+rewrite later), and train on (AI section -> original section). Unlike paragraph_rewrite, the AI side owns
+the paragraphing and the argument flow inside the section, as in real AI-drafted articles.
+
+Facts are the risk: a draft that adds numbers or names teaches the model to delete facts, and one that
+drops most of them teaches it to invent. `build` filters both ways.
 """
 from __future__ import annotations
 
+import hashlib
+import random
+from collections import Counter
 
-def make_jobs(*_args, **_kwargs):
-    raise NotImplementedError("outline_regen is the planned v2 builder; see docs/rfc.md §v2")
+import httpx
+
+from ..config import Config
+from ..corpus import Post, Unit, make_sections
+from ..llm import ChatClient, make_client
+from ..metrics import GROUPED_NUM_RE
+from ..pairs import latin, to_example
+from .paragraph_rewrite import load_style_pool  # noqa: F401  (re-exported for 02_generate)
+
+STAGES = ["extract", "draft"]
+
+EXTRACT_PROMPT = (
+    "阅读下面这一节文章。先按原文顺序列出它的要点，每个要点一行，只概括意思，不要照抄原句；"
+    "再列出其中出现的全部具体事实：数字、人名、机构名、产品名、书名、例子、引语，一项一行，照原文写。\n"
+    "只输出下面的格式，不要别的内容：\n要点：\n1. ……\n事实：\n- ……"
+)
+
+DRAFT_PROMPTS = {
+    "draft_default": "下面是一节文章的要点和事实清单。请据此写出这一节的正文，约 {n} 字。用你自己最自然的写法，自己决定怎么分段、怎么组织。",
+    "draft_style": (
+        "下面先给出两段示例文字，然后是一节文章的要点和事实清单。"
+        "请模仿示例的文风（用词、句式、节奏），据此写出这一节的正文，约 {n} 字，自己决定怎么分段、怎么组织。"
+    ),
+}
+DRAFT_RULES = "要求：只能使用清单里的事实，不要增加清单以外的数字、人名、机构或例子；要点都要写到；不要标题，不要解释，只输出正文。"
+
+EVAL_PREFERENCE = ["draft_style", "draft_default"]
 
 
-def make_worker(*_args, **_kwargs):
-    raise NotImplementedError("outline_regen is the planned v2 builder; see docs/rfc.md §v2")
+def make_units(post: Post, cfg: Config) -> list[Unit]:
+    s = cfg.get("builder.sections", {}) or {}
+    return make_sections(post, s.get("target_chars", 900), s.get("max_paras", 6), s.get("min_tail", 300))
 
 
-def build(*_args, **_kwargs):
-    raise NotImplementedError("outline_regen is the planned v2 builder; see docs/rfc.md §v2")
+def _numbers(text: str) -> set[str]:
+    return {f"{float(n.replace(',', '')):g}" for n in GROUPED_NUM_RE.findall(text)}
+
+
+def make_jobs(cfg: Config, units: list[dict], done: set[str], stage: str = "draft", outlines: dict[str, str] | None = None) -> list[dict]:
+    if stage == "extract":
+        return [{"unit_id": u["unit_id"], "prompt_id": "extract", "unit": u} for u in units if f"{u['unit_id']}|extract" not in done]
+    if stage != "draft":
+        raise ValueError(f"unknown stage {stage!r}; outline_regen has {STAGES}")
+    outlines = outlines or {}
+    missing = [u["unit_id"] for u in units if u["unit_id"] not in outlines]
+    if missing:
+        raise ValueError(f"{len(missing)} sections have no outline yet (e.g. {missing[0]}); run --stage extract first")
+    prompt_ids = cfg.get("builder.prompts", list(DRAFT_PROMPTS))
+    return [{"unit_id": u["unit_id"], "prompt_id": p, "unit": u, "outline": outlines[u["unit_id"]]}
+            for u in units for p in prompt_ids if f"{u['unit_id']}|{p}" not in done]
+
+
+def build_draft_messages(unit: dict, prompt_id: str, outline: str, style_pool: list[str]) -> list[dict]:
+    parts = [DRAFT_PROMPTS[prompt_id].format(n=len(unit["text"])), DRAFT_RULES]
+    if prompt_id == "draft_style":
+        if len(style_pool) < 2:
+            raise ValueError("draft_style needs style exemplars; check builder.style_exemplars.paths")
+        rng = random.Random(hashlib.md5(f"{unit['unit_id']}|draft_style".encode()).hexdigest())
+        a, b = rng.sample(style_pool, 2)
+        parts.append(f"【示例一】\n{a}\n\n【示例二】\n{b}")
+    parts.append(f"【要点与事实】\n{outline}")
+    return [{"role": "user", "content": "\n\n".join(parts)}]
+
+
+def make_worker(cfg: Config, _client_unused, style_pool: list[str], stage: str = "draft"):
+    """`extract` uses the `rewriter` section; `draft` uses the `drafter` section (falls back to rewriter)."""
+    if stage == "extract":
+        client = ChatClient(cfg["rewriter"])
+    else:
+        section = cfg.get("drafter") or cfg["rewriter"]
+        run_root = cfg.path(section["run_dir"]) if section.get("run_dir") else cfg.work("command_runs", "x").parent
+        client = make_client(section, run_root)
+
+    async def worker(http: httpx.AsyncClient, job: dict) -> dict:
+        unit = job["unit"]
+        if stage == "extract":
+            messages = [{"role": "user", "content": f"{EXTRACT_PROMPT}\n\n【文章】\n{unit['text']}"}]
+        else:
+            messages = build_draft_messages(unit, job["prompt_id"], job["outline"], style_pool)
+        kwargs = {"job_id": f"{unit['unit_id']}_{job['prompt_id']}"} if not isinstance(client, ChatClient) else {}
+        res = await client.complete(http, messages, max_tokens=min(4096, 3 * len(unit["text"]) + 400), **kwargs)
+        key = "outline" if stage == "extract" else "rewrite"
+        return {"unit_id": unit["unit_id"], "prompt_id": job["prompt_id"], key: res["text"], "usage": res.get("usage", {})}
+
+    worker.concurrency = client.concurrency  # type: ignore[attr-defined]
+    return worker
+
+
+def keep_draft(original: str, draft: str, ratio_range=(0.6, 1.7), min_number_coverage: float = 0.7, max_invented_latin: int = 1) -> tuple[bool, str]:
+    if not draft.strip():
+        return False, "empty"
+    ratio = len(draft) / max(1, len(original))
+    if not ratio_range[0] <= ratio <= ratio_range[1]:
+        return False, "length_ratio"
+    no, nd = _numbers(original), _numbers(draft)
+    if nd - no:
+        return False, "number_invented"
+    if no and len(no & nd) / len(no) < min_number_coverage:
+        return False, "numbers_missing"
+    lo = latin(original)
+    invented = {w for w in latin(draft) - lo if not any(w in x or x in w for x in lo)}
+    if len(invented) > max_invented_latin:
+        return False, "latin_invented"
+    return True, "ok"
+
+
+def build(cfg: Config, units: list[dict], rewrites: list[dict]) -> tuple[dict[str, list[dict]], list[dict], Counter]:
+    by_id = {u["unit_id"]: u for u in units}
+    flt = cfg.get("builder.filter", {}) or {}
+    ratio = tuple(flt.get("length_ratio", [0.6, 1.7]))
+    coverage = float(flt.get("min_number_coverage", 0.7))
+    max_latin = int(flt.get("max_invented_latin", 1))
+    kept: dict[str, list[tuple[dict, dict]]] = {"train": [], "val": [], "test": []}
+    seen: set[str] = set()
+    reasons: Counter = Counter()
+    for r in rewrites:
+        key = f"{r['unit_id']}|{r['prompt_id']}"
+        if r.get("prompt_id") == "extract" or key in seen or not r.get("rewrite") or r["unit_id"] not in by_id:
+            continue
+        seen.add(key)
+        unit = by_id[r["unit_id"]]
+        ok, why = keep_draft(unit["text"], r["rewrite"], ratio, coverage, max_latin)
+        reasons[f"{r['prompt_id']}:{why}"] += 1
+        if ok:
+            kept[unit["split"]].append((unit, r))
+    instruction = cfg.instruction
+    rng = random.Random(int(cfg.get("corpus.split.seed", 0)))
+    examples = {}
+    for split in ("train", "val"):
+        ex = [to_example(instruction, u, r["rewrite"]) for u, r in kept[split]]
+        rng.shuffle(ex)
+        examples[split] = ex
+    by_unit: dict[str, dict[str, dict]] = {}
+    for u, r in kept["test"]:
+        by_unit.setdefault(u["unit_id"], {})[r["prompt_id"]] = r
+    eval_inputs = []
+    for uid in sorted(by_unit):
+        options = by_unit[uid]
+        r = next((options[p] for p in EVAL_PREFERENCE if p in options), next(iter(options.values())))
+        u = by_id[uid]
+        eval_inputs.append({"unit_id": uid, "prompt_id": r["prompt_id"], "ai_text": r["rewrite"], "prev": u["prev"], "original": u["text"]})
+    return examples, eval_inputs, reasons
+

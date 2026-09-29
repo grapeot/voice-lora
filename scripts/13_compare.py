@@ -92,21 +92,30 @@ def main() -> None:
     title = args.title or next((b.text.lstrip("# ").strip() for b in left_blocks if b.text.startswith("# ")), src.stem)
     author = cfg.get("author.name", "作者")
 
-    # The paragraph log is in the order of the original's prose blocks; align on it rather than re-parsing
-    # the rewritten markdown, whose paragraph count can differ when the model splits a paragraph.
-    prose = [b for b in left_blocks if b.rewrite]
-    if len(prose) != len(log):
-        raise SystemExit(f"{len(prose)} prose paragraphs in the original but {len(log)} in the log; rerun 08_rewrite.py")
-    right = {id(b): restore_links(x["output"], b.links)[0] for b, x in zip(prose, log, strict=True)}
+    # Align on the rewrite log: each entry lists the original blocks it covers (a paragraph or a section).
+    # Older logs without "blocks" are one entry per prose block, in order.
+    if log and "blocks" not in log[0]:
+        prose_idx = [i for i, b in enumerate(left_blocks) if b.rewrite]
+        if len(prose_idx) != len(log):
+            raise SystemExit(f"{len(prose_idx)} prose paragraphs in the original but {len(log)} in the log; rerun 08_rewrite.py")
+        log = [{**x, "blocks": [i]} for x, i in zip(log, prose_idx, strict=True)]
+    start = {x["blocks"][0]: x for x in log}
+    covered = {i for x in log for i in x["blocks"]}
+    right = {i: restore_links(x["output"], [lk for j in x["blocks"] for lk in left_blocks[j].links])[0] for i, x in start.items()}
     n_links_out = sum(len(LINK_RE.findall(t)) for t in right.values())
     rows = []
-    for lb in left_blocks:
+    for i, lb in enumerate(left_blocks):
         if not lb.rewrite:
             if lb.text.startswith("#") and not lb.text.startswith("# "):
                 rows.append(f'<div class="sec">{html.escape(lb.text.lstrip("# ").strip())}</div>')
             continue
-        rows.append('<div class="row cols"><div><span class="label">原稿</span><div class="prose">' + render(lb.text, lex_re) +
-                    '</div></div><div class="right"><span class="label">改写</span><div class="prose">' + render(right[id(lb)], lex_re) + "</div></div></div>")
+        if i not in start:
+            if i not in covered:
+                raise SystemExit(f"block {i} is missing from the rewrite log; rerun 08_rewrite.py")
+            continue
+        left_text = "\n\n".join(left_blocks[j].text for j in start[i]["blocks"])
+        rows.append('<div class="row cols"><div><span class="label">原稿</span><div class="prose">' + render(left_text, lex_re) +
+                    '</div></div><div class="right"><span class="label">改写</span><div class="prose">' + render(right[i], lex_re) + "</div></div></div>")
     page = f"""<title>{html.escape(title)} 改写对照</title>
 <style>{STYLE}</style>
 <header><div class="wrap"><div class="card">
@@ -115,7 +124,7 @@ def main() -> None:
 <p>左栏是原稿，右栏是模型改写成{html.escape(author)}文风的版本，逐段对齐；标题、图片和表格原样保留，这里只列正文。</p>
 <div class="stats"><span>像{html.escape(author)}写的概率 <b>{stats['p_in']:.2f} → {stats['p_out']:.2f}</b></span>
 <span>AI 腔词 / 千字 <b>{stats['m_in']:.1f} → {stats['m_out']:.1f}</b></span>
-<span>正文段落 <b>{len(log)}</b></span><span>链接 <b>{n_links_out} / {n_links}</b></span></div>
+<span>改写单元 <b>{len(log)}</b></span><span>链接 <b>{n_links_out} / {n_links}</b></span></div>
 </div></div></header>
 <div class="wrap">
 <div class="head cols"><div><b>原稿</b>AI 起草的版本</div><div><b>改写</b>{html.escape(args.name)}</div></div>

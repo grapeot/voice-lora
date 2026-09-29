@@ -1,4 +1,4 @@
-"""Rewrite whole markdown articles paragraph by paragraph with any async `rewrite(text, prev)` function."""
+"""Rewrite whole markdown articles unit by unit (paragraphs or sections) with any async `rewrite(text, prev)` function."""
 from __future__ import annotations
 
 import asyncio
@@ -44,28 +44,59 @@ def guarded(rewrite: Rewrite, retries: int = 1) -> Rewrite:
     return run
 
 
-async def rewrite_article(src: Path, rewrite: Rewrite, mode: str = "parallel") -> tuple[str, list[dict]]:
-    """mode="parallel": all paragraphs at once, each with the previous *input* paragraph as context.
-    mode="chained": in order, each with the previous *output* as context (closer to training, much slower).
-    Headings, images, tables and code pass through unchanged; links are re-attached when their anchor survives."""
+def group_blocks(blocks: list, unit: str = "paragraph", target_chars: int = 900, max_paras: int = 6) -> list[list[int]]:
+    """Indices of prose blocks to rewrite together. "paragraph": one block per group. "section": consecutive
+    prose blocks up to `target_chars` / `max_paras`; a heading, image, table or code block closes the group."""
+    groups: list[list[int]] = []
+    cur: list[int] = []
+    for i, b in enumerate(blocks):
+        if not b.rewrite:
+            if cur:
+                groups.append(cur)
+                cur = []
+            continue
+        if unit == "paragraph":
+            groups.append([i])
+            continue
+        cur.append(i)
+        if sum(len(blocks[j].plain) for j in cur) >= target_chars or len(cur) >= max_paras:
+            groups.append(cur)
+            cur = []
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+async def rewrite_article(src: Path, rewrite: Rewrite, mode: str = "parallel", unit: str = "paragraph",
+                          target_chars: int = 900, max_paras: int = 6) -> tuple[str, list[dict]]:
+    """Rewrite the prose of a markdown article one unit at a time.
+
+    unit="paragraph" sends each paragraph alone (v1 models); unit="section" sends a few consecutive paragraphs
+    as one text and lets the model re-paragraph them (v2 models). mode="parallel" sends every unit at once with
+    the previous *input* as context; mode="chained" goes in order with the previous *output* as context.
+    Headings, images, tables and code pass through unchanged; links are re-attached (see restore_links)."""
     blocks = split_blocks(src.read_text(encoding="utf-8"))
-    prose = [b for b in blocks if b.rewrite]
+    groups = group_blocks(blocks, unit, target_chars, max_paras)
+    inputs = ["\n\n".join(blocks[j].plain for j in g) for g in groups]
     outs: list[str] = []
     if mode == "chained":
         prev = ""
-        for b in prose:
-            prev = await rewrite(b.plain, prev)
+        for text in inputs:
+            prev = await rewrite(text, prev)
             outs.append(prev)
     else:
-        prevs = [""] + [b.plain for b in prose[:-1]]
-        outs = list(await asyncio.gather(*(rewrite(b.plain, p) for b, p in zip(prose, prevs, strict=True))))
-    lost = 0
-    for b, o in zip(prose, outs, strict=True):
-        b.output, n = restore_links(o, b.links)
-        lost += n
-    log = [{"input": b.plain, "output": o} for b, o in zip(prose, outs, strict=True)]
-    if lost:
-        print(f"{src.name}: {lost} links could not be re-attached", flush=True)
+        prevs = [""] + inputs[:-1]
+        outs = list(await asyncio.gather(*(rewrite(t, p) for t, p in zip(inputs, prevs, strict=True))))
+    appended = 0
+    for g, o in zip(groups, outs, strict=True):
+        links = [lk for j in g for lk in blocks[j].links]
+        blocks[g[0]].output, n = restore_links(o, links)
+        appended += n
+        for j in g[1:]:
+            blocks[j].output = None  # the whole group's text now lives in its first block
+    log = [{"input": t, "output": o, "blocks": g} for t, o, g in zip(inputs, outs, groups, strict=True)]
+    if appended:
+        print(f"{src.name}: {appended} links appended at the end of their paragraph", flush=True)
     return join_blocks(blocks), log
 
 

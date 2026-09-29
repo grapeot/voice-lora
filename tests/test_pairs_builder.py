@@ -63,5 +63,5 @@ def test_unknown_prompt_and_builder_are_rejected(tmp_path):
         pr.make_jobs(c, [{"unit_id": "x", "text": "t"}], set())
     with pytest.raises(ValueError):
         get_builder("nope")
-    with pytest.raises(NotImplementedError):
-        get_builder("outline_regen").build(c, [], [])
+    with pytest.raises(ValueError):  # draft stage needs outlines first
+        get_builder("outline_regen").make_jobs(c, [{"unit_id": "x", "text": "t"}], set(), stage="draft", outlines={})

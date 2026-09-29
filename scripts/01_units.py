@@ -11,6 +11,7 @@ from dataclasses import asdict
 import _bootstrap  # noqa: F401
 from voice_lora import jsonl
 from voice_lora.cli import config_from, parser
+from voice_lora.builders import get_builder
 from voice_lora.corpus import assign_splits, load_posts, make_units
 
 
@@ -29,12 +30,18 @@ def main() -> None:
             fixed = {row["slug"]: row["split"] for row in csv.DictReader(f)}
         splits = {slug: fixed.get(slug, "train") for slug in splits}
     u = rules.get("units", {})
+    builder = get_builder(cfg.get("builder.name", "paragraph_rewrite"))
+    # Builders may define their own unit (outline_regen cuts sections); the default is paragraph units.
+    if hasattr(builder, "make_units"):
+        cut = lambda p: builder.make_units(p, cfg)  # noqa: E731
+    else:
+        cut = lambda p: make_units(p, u.get("min_chars", 50), u.get("max_chars", 800))  # noqa: E731
     units = []
     with cfg.work("posts.csv").open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["slug", "date", "split", "title", "units", "chars"])
         for p in posts:
-            us = make_units(p, u.get("min_chars", 50), u.get("max_chars", 800))
+            us = cut(p)
             for x in us:
                 x.split = splits[p.slug]
             units.extend(us)

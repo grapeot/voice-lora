@@ -28,3 +28,27 @@ def test_fuzzy_link_does_not_cross_punctuation():
                            [("芯片与前沿技术研究机构 SemiAnalysis", "https://example.com/s")])
     linked = out[out.index("[") + 1 : out.index("](https://example.com/s)")]
     assert "SemiAnalysis" in linked and "。" not in linked
+
+
+def test_section_rewrite_merges_groups_and_keeps_headings():
+    import asyncio
+    from pathlib import Path
+
+    from voice_lora.articles import group_blocks, rewrite_article
+
+    md = "# 标题\n\n第一段，见[链接](https://example.com/x)。\n\n第二段内容。\n\n## 小节\n\n第三段内容。"
+    blocks = split_blocks(md)
+    assert group_blocks(blocks, "section", target_chars=900) == [[1, 2], [4]]
+    assert group_blocks(blocks, "paragraph") == [[1], [2], [4]]
+
+    async def fake(text, prev):
+        return text.replace("\n\n", "")  # the model may merge paragraphs
+
+    p = Path(__file__).with_name("_tmp_article.md")
+    p.write_text(md, encoding="utf-8")
+    try:
+        out, log = asyncio.run(rewrite_article(p, fake, unit="section"))
+    finally:
+        p.unlink()
+    assert out.startswith("# 标题\n\n第一段，见[链接](https://example.com/x)。第二段内容。\n\n## 小节")
+    assert [x["blocks"] for x in log] == [[1, 2], [4]]

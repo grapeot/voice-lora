@@ -16,6 +16,7 @@ corpus:
     filename_suffixes: ["-en.md", "_en.md"]
     tags: ["English"]
     statuses: ["draft"]
+    slugs: []                    # 单独排除的文章（例如文中声明"本文由 AI 撰写"的演示文章）
     date_ranges:                 # 非本人手写的时间段（含首尾），整段排除
       - ["2020-01-01", "2020-06-30"]
   units:
@@ -36,8 +37,22 @@ rewriter:                        # 任何 OpenAI 兼容接口，用来把原文�
   sampling: {temperature: 1.0, top_p: 0.95}
   extra_body: {}                 # 例如关闭思考：{"chat_template_kwargs": {"enable_thinking": false}}
 
+drafter:                         # 只有 outline_regen 用：按要点写整节的模型，最好就是以后起草文章的那类模型
+  kind: openai                   # openai：OpenAI 兼容接口（字段同 rewriter）；command：调用命令行 agent，见下
+  base_url: http://localhost:8000/v1
+  model: your-drafter-model
+  concurrency: 6
+  # kind: command
+  # command: ["your-agent-cli", "--print", "Read {prompt_file} and follow it exactly."]
+  # output_file: output.txt
+  # prompt_suffix: "把结果写入 {output_file}，只写正文。"
+  # timeout_s: 600
+  # concurrency: 10
+  # run_dir: /path/to/scratch    # 每次调用一个空目录作为工作目录
+
 builder:
-  name: paragraph_rewrite        # v1：段落级反向改写。v2 的 outline_regen 尚未实现
+  name: paragraph_rewrite        # paragraph_rewrite（v1，段落级）或 outline_regen（v2，节级：先 extract 要点，再 draft 整节）
+  sections: {target_chars: 900, max_paras: 6, min_tail: 300}   # 仅 outline_regen
   prompts: [default, formal, style_mimic, expand, condense]
   style_exemplars:               # style_mimic 用的"目标 AI 文风"示例文章，最好就是你之后要改写的那类文章
     paths:

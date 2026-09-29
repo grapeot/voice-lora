@@ -20,7 +20,8 @@ from voice_lora.cli import config_from, parser
 from voice_lora.pairs import user_message
 
 
-async def run(cfg, name: str, articles: list[Path], mode: str, concurrency: int, skip_pairs: bool, serve: dict, no_guard: bool = False) -> None:
+async def run(cfg, name: str, articles: list[Path], mode: str, concurrency: int, skip_pairs: bool, serve: dict,
+              no_guard: bool = False, unit: str = "paragraph") -> None:
     url = serve["base_url"].rstrip("/") + "/chat/completions"
     sem = asyncio.Semaphore(concurrency)
     tokens = 0
@@ -46,7 +47,9 @@ async def run(cfg, name: str, articles: list[Path], mode: str, concurrency: int,
             jsonl.write(cfg.work("eval", f"{name}.jsonl"), [{**r, "output": o, "system": name} for r, o in zip(rows, outs, strict=True)])
         for src in articles:
             safe = rewrite if no_guard else guarded(rewrite)
-            md, log = await rewrite_article(src, safe, mode=mode)
+            sec = cfg.get("builder.sections", {}) or {}
+            md, log = await rewrite_article(src, safe, mode=mode, unit=unit, target_chars=sec.get("target_chars", 900),
+                                            max_paras=sec.get("max_paras", 6))
             save(md, log, cfg.work("eval", "articles", f"{src.stem}.{name}.md"))
             for fb in getattr(safe, "guarded_log", []):
                 print(f"kept original ({fb['reason']}): {fb['input'][:60]}…", flush=True)
@@ -63,12 +66,15 @@ def main() -> None:
     ap.add_argument("--skip-pairs", action="store_true")
     ap.add_argument("--serve-url", help="override serve.base_url, e.g. http://localhost:1234/v1 for LM Studio")
     ap.add_argument("--serve-model", help="override serve.model")
+    ap.add_argument("--unit", choices=["paragraph", "section"], default=None,
+                    help="article rewriting unit; default: section for outline_regen models, paragraph otherwise")
     ap.add_argument("--no-guard", action="store_true", help="keep unsafe paragraph rewrites instead of retrying / falling back to the input")
     args = ap.parse_args()
     cfg = config_from(args)
     arts = [cfg.path(a) for a in (args.article or cfg.get("evaluate.articles", []) or [])]
     serve = {**cfg["serve"], **({"base_url": args.serve_url} if args.serve_url else {}), **({"model": args.serve_model} if args.serve_model else {})}
-    asyncio.run(run(cfg, args.name, arts, args.mode, args.concurrency, args.skip_pairs, serve, args.no_guard))
+    unit = args.unit or ("section" if cfg.get("builder.name") == "outline_regen" else "paragraph")
+    asyncio.run(run(cfg, args.name, arts, args.mode, args.concurrency, args.skip_pairs, serve, args.no_guard, unit))
 
 
 if __name__ == "__main__":

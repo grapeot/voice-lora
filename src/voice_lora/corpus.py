@@ -106,6 +106,8 @@ def clean_body(body: str) -> str:
 def exclusion_reason(path: Path, meta: dict, body: str, rules: dict) -> str | None:
     """Why a post is left out of the corpus, or None to keep it. `rules` is the config's `corpus` section."""
     ex = rules.get("exclude", {})
+    if (meta.get("Slug") or path.stem) in set(ex.get("slugs", [])):
+        return "slug"
     if any(path.name.endswith(s) for s in ex.get("filename_suffixes", [])):
         return "filename_suffix"
     tags = {t.strip().lower() for t in meta.get("Tags", "").split(",")}
@@ -211,3 +213,33 @@ def assign_splits(
         for i, slug in enumerate(slugs):
             splits[slug] = "test" if i < k_test else "val" if i < k_test + k_val else "train"
     return splits
+
+
+HEADING_SPLIT_RE = re.compile(r"\n(?=[ \t]*#{1,6}\s)")
+
+
+def make_sections(post: Post, target_chars: int = 900, max_paras: int = 6, min_tail: int = 300) -> list[Unit]:
+    """Cut a post into sections: split at headings, then close a window once it reaches `target_chars`
+    or `max_paras` paragraphs; a short tail (< min_tail chars) joins the previous window of the same chunk.
+    Paragraphs inside a section are joined with blank lines, so the section keeps its paragraph structure."""
+    groups: list[list[str]] = []
+    for chunk in HEADING_SPLIT_RE.split("\n" + post.body):
+        cur: list[str] = []
+        chunk_groups: list[list[str]] = []
+        for para in paragraphs(chunk):
+            cur.append(para)
+            if sum(len(p) for p in cur) >= target_chars or len(cur) >= max_paras:
+                chunk_groups.append(cur)
+                cur = []
+        if cur:
+            if chunk_groups and sum(len(p) for p in cur) < min_tail:
+                chunk_groups[-1] += cur
+            else:
+                chunk_groups.append(cur)
+        groups.extend(chunk_groups)
+    texts = ["\n\n".join(g) for g in groups]
+    return [
+        Unit(unit_id=f"{post.slug}#s{i:02d}", slug=post.slug, date=post.date.isoformat() if post.date else "",
+             index=i, text=t, prev=texts[i - 1] if i else "")
+        for i, t in enumerate(texts)
+    ]

@@ -58,7 +58,8 @@ async def run(cfg) -> None:
         jsonl.write(cfg.work("eval", "baseline_fewshot.jsonl"), [{**r, "output": o, "system": "baseline_fewshot"} for r, o in zip(rows, outs, strict=True)])
         for a in cfg.get("evaluate.articles", []) or []:
             src = cfg.path(a)
-            md, log = await rewrite_article(src, rewrite, mode="parallel")
+            unit = "section" if cfg.get("builder.name") == "outline_regen" else "paragraph"
+            md, log = await rewrite_article(src, rewrite, mode="parallel", unit=unit)
             save(md, log, cfg.work("eval", "articles", f"{src.stem}.baseline_fewshot.md"))
     print("done")
 

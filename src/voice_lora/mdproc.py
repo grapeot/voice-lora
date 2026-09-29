@@ -87,4 +87,5 @@ def restore_links(text: str, links: list[tuple[str, str]], min_ratio: float = 0.
 
 
 def join_blocks(blocks: list[Block]) -> str:
-    return "\n\n".join(b.output for b in blocks) + "\n"
+    """Blocks whose output is None were merged into an earlier block and are skipped."""
+    return "\n\n".join(b.output for b in blocks if b.output is not None) + "\n"

@@ -15,6 +15,9 @@
 - 数字比较忽略千分位（`14,000` 与 `14000`）；只用于评估和保险，训练过滤规则不变以保证 v1 可复现。
 - `08_rewrite.py` 增加 `--serve-url/--serve-model`，可直接指向 LM Studio；新增 `13_compare.py` 并排对照页。
 - 用 llama.cpp 转 Q8_0 GGUF 并在 LM Studio 上跑通。
+- 实现 v2 构造器 `outline_regen`：`corpus.make_sections` 按节切分；两阶段生成（extract 要点与事实 → draft 整节）；`keep_draft` 双向卡事实；`CommandClient` 以命令模板调用命令行 agent；`01_units.py` 支持构造器自定义单位，`02_generate.py` 支持 `--stage/--split`。
+- 整篇推理支持按节改写（`--unit section`），对照页按改写单元对齐。
+- `corpus.exclude.slugs`：排除文中声明由 AI 撰写的文章。
 
 ## Lessons Learned
 
