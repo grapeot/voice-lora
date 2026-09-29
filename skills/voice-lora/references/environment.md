@@ -31,5 +31,5 @@ v1 实测的版本组合：unsloth 2026.9.12、torch 2.12.1+cu132、transformers
 ## 本地部署
 
 - vLLM：`06_merge.py` 合并后 `serve_vllm.sh`，`08_rewrite.py` 走 `serve.base_url`。
-- 桌面端（LM Studio / llama.cpp）：用 llama.cpp 的 `convert_hf_to_gguf.py --outtype q8_0` 把合并后的权重转成 GGUF（9B 约 9.1G，转换环境需要 transformers ≥ 5.5），用 `lms import --user-repo <owner>/<name> <file>` 导入，`lms load` 加载后起 `lms server start`。LM Studio 的接口是 OpenAI 兼容的：`08_rewrite.py --serve-url http://localhost:1234/v1 --serve-model <identifier>`。v1 在 M3 Ultra 上 4 并发改写一篇 40 段的文章约 55 秒。按这套训练数据训出来的模型不会输出思考内容，不需要额外开关。
+- 桌面端（Mac 或单张 NVIDIA 卡）：用 llama.cpp 的 `convert_hf_to_gguf.py --outtype q8_0` 把合并后的权重转成 GGUF（9B 约 9.1G，转换环境需要 transformers ≥ 5.5），用 llama.cpp 的 `llama-server -m <gguf> --alias <id> --port 8091 -c 16384 -np 4 -ngl 99 --jinja` 起服务，`voice-lora rewrite --card` 指向它。不要用 LM Studio：它的重复惩罚只看最近 64 个 token，也不接受请求里的窗口参数，改写会明显偏保守。在 M3 Ultra 上 4 并发改写一篇 40 段的文章约 45 秒。按这套训练数据训出来的模型不会输出思考内容，不需要额外开关。
 - 模型文件大，别让它们进备份：LoRA、合并权重和 GGUF 放在备份范围之外，或在备份配置里单独排除。
