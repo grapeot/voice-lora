@@ -1,0 +1,24 @@
+# Private layer: real config, corpus-derived data, runs, blind-test answers, archives.
+local/
+runs/
+*.safetensors
+*.gguf
+*.bin
+*.pt
+*.pth
+checkpoint-*/
+blind_answers_*.json
+*.bundle
+
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.DS_Store

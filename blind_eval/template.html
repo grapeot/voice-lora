@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>文风盲评</title>
+<style>
+:root {
+  --paper: #f3f4ef; --sheet: #fbfbf8; --ink: #1d2320; --muted: #5d665f; --rule: #d9ddd3;
+  --grid: #b9cdb9; --accent: #2d4876; --accent-soft: rgba(45, 72, 118, 0.10);
+  --serif: "Noto Serif SC", "Songti SC", "STSong", serif;
+  --sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; --paper: #131715; --sheet: #1a1f1c; --ink: #e3e7e1; --muted: #9aa39b; --rule: #2c332e;
+          --grid: #33483a; --accent: #97b1e0; --accent-soft: rgba(151, 177, 224, 0.12); }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.7;
+       padding-inline: 16px; padding-block: 0 48px; }
+header { margin-inline: -16px; padding: 32px 16px 24px; border-bottom: 1px solid var(--rule); background-color: var(--sheet);
+         background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+         background-size: 28px 28px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 24px; }
+.card { background: var(--sheet); border: 1px solid var(--rule); padding: 18px 20px; display: grid; gap: 12px; max-width: 760px; }
+h1 { font-family: var(--serif); font-size: clamp(24px, 4vw, 34px); margin: 0; }
+h2 { font-family: var(--serif); font-size: 18px; margin: 0; }
+p { margin: 0; max-width: 68ch; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; margin-top: 24px; }
+.top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.progress { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.bar { height: 3px; background: var(--rule); } .bar > i { display: block; height: 100%; background: var(--accent); }
+.prose { font-family: var(--serif); font-size: 16px; line-height: 1.85; white-space: pre-wrap; }
+.pair { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+.pair > div { border: 1px solid var(--rule); padding: 10px 12px; }
+.label { font-size: 12px; color: var(--muted); }
+.btns { display: flex; gap: 10px; flex-wrap: wrap; }
+button { font: inherit; font-size: 14px; cursor: pointer; border-radius: 3px; padding: 8px 14px; border: 1px solid var(--ink); background: var(--sheet); color: var(--ink); }
+button.primary { background: var(--ink); color: var(--sheet); }
+button.ghost { border-color: var(--rule); color: var(--muted); }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: 0.4; cursor: default; }
+details { font-size: 13.5px; color: var(--muted); } summary { cursor: pointer; }
+.big { font-family: var(--serif); font-size: 30px; font-weight: 700; }
+@media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header><div class="wrap"><div class="card">
+  <h1>文风盲评</h1>
+  <p id="intro"></p>
+  <div class="btns"><button id="export" class="primary">导出答案（JSON）</button><span class="progress" id="saved"></span></div>
+</div></div></header>
+<div class="wrap"><div class="grid"><section class="card" id="s1"></section><section class="card" id="s2"></section></div></div>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+(function () {
+  "use strict";
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const KEY = "voice_lora_blind_" + D.eval_id;
+  let state = { s1: {}, s2: {} };
+  try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { /* private window */ }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } $("saved").textContent = "已记录 " + (Object.keys(state.s1).length + Object.keys(state.s2).length) + " 条（存在本浏览器）"; };
+  $("intro").textContent = "左边：一半是" + D.author + "的原文，一半是模型的改写，逐段判断是不是" + D.author + "写的。右边：同一段 AI 文字的两个改写，选更像" + D.author + "的一个。做完才显示结果；中途关掉页面，进度会保留在这个浏览器里。";
+  $("export").onclick = () => {
+    const blob = new Blob([JSON.stringify({ eval_id: D.eval_id, exported: new Date().toISOString(), s1: state.s1, s2: state.s2 }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "blind_answers_" + D.eval_id + ".json"; a.click();
+  };
+
+  function mount(kind) {
+    const items = D[kind], el = $(kind), ans = state[kind];
+    let i = items.findIndex((x) => !(x.id in ans)); if (i < 0) i = items.length;
+    const title = kind === "s1" ? "这段是" + D.author + "写的吗？" : "哪一段更像" + D.author + "？";
+    function render() {
+      const done = Object.keys(ans).length;
+      let h = '<div class="top"><h2>' + esc(title) + '</h2><span class="progress">' + Math.min(i + 1, items.length) + " / " + items.length + "</span></div>";
+      if (i >= items.length) {
+        if (kind === "s1") {
+          const fake = items.filter((x) => !x.mine), real = items.filter((x) => x.mine);
+          const fm = fake.filter((x) => ans[x.id] === true).length, rm = real.filter((x) => ans[x.id] === true).length;
+          h += '<div class="big">' + Math.round(100 * fm / Math.max(1, fake.length)) + "%</div><p>模型写的 " + fake.length + " 段里判为原文的有 " + fm + " 段；真原文 " + real.length + " 段里判为原文的有 " + rm + " 段。</p>";
+        } else {
+          const dec = items.filter((x) => ans[x.id] && ans[x.id] !== "tie"), w = dec.filter((x) => ans[x.id] === x.model_side).length;
+          h += '<div class="big">' + Math.round(100 * w / Math.max(1, dec.length)) + "%</div><p>分出胜负的 " + dec.length + " 组里，模型赢了 " + w + " 组；对手是 " + esc(D.baseline_name) + "。</p>";
+        }
+        h += '<div class="btns"><button class="ghost" data-a="review">回看并修改</button></div>';
+      } else {
+        const it = items[i];
+        h += '<div class="bar"><i style="width:' + (100 * done / items.length) + '%"></i></div>';
+        if (kind === "s1") {
+          h += '<div class="prose">' + esc(it.text) + '</div><div class="btns"><button class="primary" data-a="yes">是</button><button data-a="no">不是</button>';
+        } else {
+          h += '<details><summary>看 AI 原文</summary><div class="prose">' + esc(it.input) + "</div></details>" +
+               '<div class="pair"><div><span class="label">左</span><div class="prose">' + esc(it.left) + '</div></div><div><span class="label">右</span><div class="prose">' + esc(it.right) + "</div></div></div>" +
+               '<div class="btns"><button class="primary" data-a="left">左边更像</button><button class="primary" data-a="right">右边更像</button><button data-a="tie">差不多</button>';
+        }
+        h += '<button class="ghost" data-a="back"' + (i === 0 ? " disabled" : "") + ">上一条</button></div>";
+      }
+      el.innerHTML = h;
+      el.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
+        const a = b.dataset.a;
+        if (a === "review") { i = 0; return render(); }
+        if (a === "back") { if (i > 0) i--; return render(); }
+        ans[items[i].id] = kind === "s1" ? a === "yes" : a;
+        save(); i++; render();
+      });
+    }
+    render();
+  }
+  mount("s1"); mount("s2"); save();
+})();
+</script>
+</body>
+</html>

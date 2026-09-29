@@ -1,0 +1,41 @@
+[project]
+name = "voice-lora"
+version = "0.1.0"
+description = "Fine-tune a LoRA that rewrites AI-written Chinese into one author's voice"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "httpx>=0.27",
+  "pyyaml>=6",
+  "numpy>=1.26",
+  "scikit-learn>=1.4",
+  "sacrebleu>=2.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+# Training, HF inference and merging need a GPU environment with Unsloth; install it separately
+# (see skills/voice-lora/SKILL.md). vLLM serving needs its own environment again.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402", "I001"]
+"scripts/13_compare.py" = ["E402", "I001", "E501"]

@@ -1,0 +1,69 @@
+# voice-lora 配置示例。复制到 local/config.yaml 再改；local/ 不进版本控制。
+# 所有相对路径都相对于本文件所在目录解析。
+
+author:
+  name: 作者                     # 出现在训练指令里的称呼，训练和推理必须一致
+  instruction: 把下面这段文字改写成{name}的文风，内容和顺序不变。
+
+workdir: local/runs/v1           # 数据、改写、训练输出、评估结果都写在这里
+
+corpus:
+  paths:                         # 作者本人写的文章，支持 glob
+    - /path/to/your/blog/content/*.md
+  frontmatter: auto              # auto：识别 "---" 包裹或 Pelican 式 "Key: value" 头
+  min_cjk_ratio: 0.15            # 汉字占比低于此值视为英文文章，排除
+  exclude:
+    filename_suffixes: ["-en.md", "_en.md"]
+    tags: ["English"]
+    statuses: ["draft"]
+    date_ranges:                 # 非本人手写的时间段（含首尾），整段排除
+      - ["2020-01-01", "2020-06-30"]
+  units:
+    min_chars: 50                # 更短的段落并入下一段
+    max_chars: 800               # 更长的段落在句末标点处对半切
+  split:
+    test_posts: 20
+    val_posts: 10
+    seed: 42
+    min_test_per_bucket: {}      # 按年份桶的最少测试文章数，例如 {"2026": 2}
+    from_file: null              # 沿用上一轮的划分（上一轮 workdir 里的 posts.csv），保证多轮结果可比；新文章进训练集
+
+rewriter:                        # 任何 OpenAI 兼容接口，用来把原文改写成 AI 腔
+  base_url: http://localhost:8000/v1
+  model: your-rewriter-model
+  api_key_env: REWRITER_API_KEY  # 本地服务不需要 key 时，环境变量可以不设
+  concurrency: 6
+  sampling: {temperature: 1.0, top_p: 0.95}
+  extra_body: {}                 # 例如关闭思考：{"chat_template_kwargs": {"enable_thinking": false}}
+
+builder:
+  name: paragraph_rewrite        # v1：段落级反向改写。v2 的 outline_regen 尚未实现
+  prompts: [default, formal, style_mimic, expand, condense]
+  style_exemplars:               # style_mimic 用的"目标 AI 文风"示例文章，最好就是你之后要改写的那类文章
+    paths:
+      - /path/to/ai-written-articles/*.md
+    exclude: []                  # 留作端到端评估的文章写在这里，避免泄漏
+  filter:
+    length_ratio: [0.5, 1.9]
+    max_invented_latin: 1
+  identity_fraction: 0.05        # 原文→原文的恒等对比例，教模型不乱改已经像人话的句子
+
+train:
+  base_model: Qwen/Qwen3.5-9B-Base
+  rank: 32
+  alpha: 32
+  lr: 1.0e-4
+  epochs: 0.5                    # 每个目标段落有多条改写，0.5 epoch 通常已到验证 loss 最低点
+  batch: 4
+  grad_accum: 4
+  max_seq: 2048
+  save_every: 0.25
+
+evaluate:
+  articles:                      # 端到端评估：真正想改写的 AI 文章，逐段送进模型
+    - /path/to/ai-written-articles/held-out-article.md
+  fewshot_k: 8                   # 基线：rewriter + 检索 k 段原文作例子
+
+serve:
+  base_url: http://localhost:8000/v1   # scripts/serve_vllm.sh 起的服务
+  model: voice-lora
