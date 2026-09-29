@@ -21,7 +21,8 @@ from voice_lora.pairs import user_message
 
 
 async def run(cfg, name: str, articles: list[Path], mode: str, concurrency: int, skip_pairs: bool, serve: dict,
-              no_guard: bool = False, unit: str = "paragraph") -> None:
+              no_guard: bool = False, unit: str = "paragraph", sampling: dict | None = None) -> None:
+    sampling = sampling or {"temperature": 0.7, "top_p": 0.95, "repetition_penalty": 1.05}
     url = serve["base_url"].rstrip("/") + "/chat/completions"
     sem = asyncio.Semaphore(concurrency)
     tokens = 0
@@ -30,7 +31,7 @@ async def run(cfg, name: str, articles: list[Path], mode: str, concurrency: int,
             nonlocal tokens
             body = {"model": serve.get("model", "voice-lora"),
                     "messages": [{"role": "user", "content": user_message(cfg.instruction, text, prev)}],
-                    "temperature": 0.7, "top_p": 0.95, "repetition_penalty": 1.05,
+                    **sampling,
                     "max_tokens": min(2048, int(len(text) * 1.6) + 64),
                     "chat_template_kwargs": {"enable_thinking": False}}
             async with sem:
@@ -69,13 +70,18 @@ def main() -> None:
     ap.add_argument("--serve-model", help="override serve.model")
     ap.add_argument("--unit", choices=["paragraph", "section"], default=None,
                     help="article rewriting unit; default: section for outline_regen models, paragraph otherwise")
+    ap.add_argument("--temperature", type=float, default=0.7, help="0 = greedy, e.g. to check that two deployments of one model agree")
+    ap.add_argument("--repetition-penalty", type=float, default=1.05, help="1.0 turns it off (servers implement it differently)")
     ap.add_argument("--no-guard", action="store_true", help="keep unsafe paragraph rewrites instead of retrying / falling back to the input")
     args = ap.parse_args()
     cfg = config_from(args)
     arts = [] if args.skip_articles else [cfg.path(a) for a in (args.article or cfg.get("evaluate.articles", []) or [])]
     serve = {**cfg["serve"], **({"base_url": args.serve_url} if args.serve_url else {}), **({"model": args.serve_model} if args.serve_model else {})}
     unit = args.unit or ("section" if cfg.get("builder.name") == "outline_regen" else "paragraph")
-    asyncio.run(run(cfg, args.name, arts, args.mode, args.concurrency, args.skip_pairs, serve, args.no_guard, unit))
+    # vLLM reads repetition_penalty; LM Studio reads repeat_penalty and silently applies its own default otherwise.
+    sampling = {"temperature": args.temperature, "top_p": 0.95 if args.temperature > 0 else 1.0,
+                "repetition_penalty": args.repetition_penalty, "repeat_penalty": args.repetition_penalty}
+    asyncio.run(run(cfg, args.name, arts, args.mode, args.concurrency, args.skip_pairs, serve, args.no_guard, unit, sampling))
 
 
 if __name__ == "__main__":
