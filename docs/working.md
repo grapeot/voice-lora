@@ -19,6 +19,7 @@
 - 整篇推理支持按节改写（`--unit section`），对照页按改写单元对齐。
 - `corpus.exclude.slugs`：排除文中声明由 AI 撰写的文章。
 - outline_regen 支持多个 drafter（`drafters` 列表，后面的模型候选加 `@name` 后缀）并新增 `draft_formal`；每条候选记录 `source`。
+- API 调用失败时透传 HTTP 状态、finish_reason 和响应片段（此前只报 `KeyError: 'message'`）。
 - 列表编号（"1) … 2) …"）不再算作必须保留的数字：Gemini 常把列表改成行文，此前被误判为丢事实。
 
 ## Lessons Learned

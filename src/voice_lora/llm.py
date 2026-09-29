@@ -29,21 +29,30 @@ class ChatClient:
     async def complete(self, client: httpx.AsyncClient, messages: list[dict], max_tokens: int = 2048, retries: int = 3) -> dict:
         """Returns {"text", "usage", "finish_reason"}; raises the last error after `retries` attempts."""
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        last: Exception | None = None
+        last = ""
         for attempt in range(retries):
             try:
                 r = await client.post(f"{self.base_url}/chat/completions", json=self.body(messages, max_tokens), headers=headers)
-                r.raise_for_status()
-                d = r.json()
-                choice = d["choices"][0]
-                return {
-                    "text": clean_output(choice["message"].get("content") or ""),
-                    "usage": d.get("usage", {}),
-                    "finish_reason": choice.get("finish_reason"),
-                }
-            except (httpx.HTTPError, KeyError, ValueError) as e:
-                last = e
+            except httpx.HTTPError as e:
+                last = f"{type(e).__name__}: {e}"
                 await asyncio.sleep(5 * (attempt + 1))
+                continue
+            # Keep the provider's own words: status, finish_reason and a slice of the body say why a call
+            # failed (rate limit, content filter, malformed request) far better than a bare KeyError.
+            body = r.text[:500]
+            if r.status_code != 200:
+                last = f"HTTP {r.status_code}: {body}"
+            else:
+                try:
+                    d = r.json()
+                    choice = d["choices"][0]
+                    content = (choice.get("message") or {}).get("content")
+                    if content:
+                        return {"text": clean_output(content), "usage": d.get("usage", {}), "finish_reason": choice.get("finish_reason")}
+                    last = f"no content (finish_reason={choice.get('finish_reason')!r}): {body}"
+                except (ValueError, KeyError, IndexError, TypeError) as e:
+                    last = f"unexpected response ({type(e).__name__}: {e}): {body}"
+            await asyncio.sleep(5 * (attempt + 1))
         raise RuntimeError(f"request failed after {retries} attempts: {last}")
 
 

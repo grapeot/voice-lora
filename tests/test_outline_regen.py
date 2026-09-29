@@ -50,3 +50,20 @@ def test_multiple_drafters_get_suffixed_prompt_ids(tmp_path):
     jobs = orr.make_jobs(cfg, units, {"p#s00|draft_default"}, stage="draft", outlines={"p#s00": "要点：1. x"})
     assert [(j["prompt_id"], j["drafter"]) for j in jobs] == [("draft_style", "a"), ("draft_formal@b", "b")]
     assert orr.base_prompt("draft_formal@b") == "draft_formal"
+
+
+def test_chat_client_reports_provider_reason():
+    import httpx
+    import pytest
+
+    from voice_lora.llm import ChatClient
+
+    def handler(request):
+        return httpx.Response(200, json={"choices": [{"finish_reason": "content_filter"}]})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await ChatClient({"base_url": "http://x/v1", "model": "m"}).complete(http, [{"role": "user", "content": "hi"}], retries=1)
+
+    with pytest.raises(RuntimeError, match="content_filter"):
+        asyncio.run(run())
