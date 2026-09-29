@@ -18,6 +18,8 @@
 - 实现 v2 构造器 `outline_regen`：`corpus.make_sections` 按节切分；两阶段生成（extract 要点与事实 → draft 整节）；`keep_draft` 双向卡事实；`CommandClient` 以命令模板调用命令行 agent；`01_units.py` 支持构造器自定义单位，`02_generate.py` 支持 `--stage/--split`。
 - 整篇推理支持按节改写（`--unit section`），对照页按改写单元对齐。
 - `corpus.exclude.slugs`：排除文中声明由 AI 撰写的文章。
+- outline_regen 支持多个 drafter（`drafters` 列表，后面的模型候选加 `@name` 后缀）并新增 `draft_formal`；每条候选记录 `source`。
+- 列表编号（"1) … 2) …"）不再算作必须保留的数字：Gemini 常把列表改成行文，此前被误判为丢事实。
 
 ## Lessons Learned
 

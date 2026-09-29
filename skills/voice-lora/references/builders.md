@@ -26,10 +26,10 @@
 两个阶段（`02_generate.py --stage extract`，然后 `--stage draft`）：
 
 - `extract`：用 `rewriter`（快的模型就行）从原文每一节抽出"要点（按顺序、只概括不照抄）+ 事实清单（数字、人名、机构、产品、书名、例子、引语）"，写进 `outlines.jsonl`。
-- `draft`：用 `drafter` 只凭清单写出这一节，两种 prompt：`draft_default`（自然写法）和 `draft_style`（模仿目标 AI 文章的示例）。`drafter` 最好就是以后起草文章的那类模型；它可以是 OpenAI 兼容接口，也可以是命令行 agent（`kind: command`，每次调用在独立的空目录里跑）。
+- `draft`：用 `drafters` 里的每个模型只凭清单写出这一节，三种 prompt：`draft_default`（自然写法）、`draft_style`（模仿目标 AI 文章的示例）、`draft_formal`（正式书面）。第一个模型最好就是以后起草文章的那类模型；再加一个不同家族的模型能增加 AI 腔的多样性（v2 用 Gemini 3.8 Flash 和 DeepSeek V4.1 Flash 各 3 个候选，每节 6 个）。drafter 可以是 OpenAI 兼容接口，也可以是命令行 agent（`kind: command`，每次调用在独立的空目录里跑）。每条候选记录 `source`，便于按模型分开检查。
 
 过滤（`keep_draft`）两头卡事实：AI 节里出现原文没有的数字就丢（否则模型学会删事实）；原文的数字在 AI 节里保留不到 70% 也丢（否则模型学会编事实）；另有英文专名和长度比检查。
 
 推理时整篇文章按节改写（`08_rewrite.py` 对 outline_regen 模型默认 `--unit section`）：标题、图片、表格处断开，其余连续段落凑成一节送进模型，输出的段落数可以和输入不同。训练的 `max_seq` 要调大（节比段长，v2 用 4096）。
 
-v2 的样本量比 v1 少得多（v1 每段 5 条改写，8,926 条；v2 每节 2 条），训练长度要重新用 `10_select_checkpoint.py` 找。
+v2 的实测：614 节 × 6 个候选 = 3,684 条，Gemini 候选 89% 通过事实过滤，DeepSeek 74%（更常丢数字、长度也更不稳）；过滤后训练 2,453 条。API 费用合计约 $4（Gemini 约 $3.3，DeepSeek 更便宜），20–32 并发 6 分钟左右跑完；同样的活用命令行 agent 跑要以小时计。训练长度仍要用 `10_select_checkpoint.py` 找。
