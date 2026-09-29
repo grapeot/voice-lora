@@ -83,7 +83,7 @@ uv venv && uv pip install -e '.[dev]'
   ```bash
   uv venv --python 3.12 && uv pip install unsloth --torch-backend=auto
   ```
-- **推理服务**：权重合并后用 vLLM 部署独立服务，或转换为 GGUF 给 LM Studio / llama.cpp 使用（v1 的 9B 模型转 Q8_0 后约 9.1G，在 Mac 上 LM Studio 里改写一篇 40 段的文章约 1 分钟）。
+- **推理服务**：权重合并后用 vLLM 部署独立服务，或转换为 GGUF 给 llama.cpp 的 `llama-server` 使用（9B 模型转 Q8_0 后约 9.1G，在 Mac 上改写一篇 40 段的文章约 1 分钟）。LM Studio 能加载同一个 GGUF，但它不传重复惩罚的窗口参数，改写会明显偏保守，见下文“用训练好的模型”。
 
 ### 2. 配置文件
 
@@ -134,7 +134,11 @@ voice-lora score *.md --classifier clf.json                                # 每
 voice-lora check --config local/config.yaml                                # 分类器可信度（见 docs/classifier.md）
 ```
 
-采样参数（temperature 0.7、top_p 0.95、重复惩罚 1.05）是正确调用的一部分，写在 `src/voice_lora/rewrite.py` 里：greedy 解码下模型大多在照抄输入；LM Studio 只认 `repeat_penalty`，所以两个键都发。自己写客户端时请复用 `request_body`。
+采样参数（temperature 0.7、top_p 0.95、重复惩罚 1.05，惩罚覆盖整个 prompt）是正确调用的一部分，写在 `src/voice_lora/rewrite.py` 里，自己写客户端时请复用 `request_body`：
+
+- greedy 解码下模型大多在照抄输入；
+- 重复惩罚必须覆盖整个 prompt，它是让模型不照抄原文的主要力量。vLLM 默认就是这样；llama.cpp 默认只看最近 64 个 token，所以要发 `repeat_last_n`。同一段文字，和输入的相似度在 vLLM 上是 0.786，在 llama-server 覆盖全文时是 0.784，在默认窗口下是 0.849。
+- LM Studio 只认 `repeat_penalty`，而且不传 `repeat_last_n`，没法正确调用这个模型。GGUF 请用 llama.cpp 的 `llama-server`。
 
 ### 5. 调优说明
 

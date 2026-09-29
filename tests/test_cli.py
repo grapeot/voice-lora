@@ -35,6 +35,7 @@ def test_request_body_sends_both_penalty_keys_and_defaults():
     b = request_body(CARD, "一段话", "上一段")
     assert b["model"] == "served-id" and b["temperature"] == 0.7 and b["top_p"] == 0.95
     assert b["repetition_penalty"] == b["repeat_penalty"] == 1.05  # LM Studio only reads repeat_penalty
+    assert b["repeat_last_n"] >= 2048  # llama.cpp's default 64-token window leaves the prompt unpenalized
     assert "【上文，仅供参考，不要改写】\n上一段" in b["messages"][0]["content"]
     g = request_body(CARD, "一段话", sampling=sampling_overrides(temperature=0, repetition_penalty=1.0))
     assert g["temperature"] == 0 and g["top_p"] == 1.0 and g["repeat_penalty"] == 1.0
