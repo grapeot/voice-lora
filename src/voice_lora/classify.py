@@ -10,6 +10,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,22 @@ from .pairs import keep_rewrite
 LENGTH_BUCKETS = [(0, 80), (80, 200), (200, 10**9)]
 MIN_PARAGRAPH = 20   # shorter prose blocks ("原稿：", captions) carry almost no signal
 FORMAT = "voice-lora-classifier/1"
+BUNDLED = "classifier-v1.1.json"   # shipped in voice_lora/data; see docs/classifier.md
+# Article-level bands, from the calibration in docs/classifier.md: the author's own posts sit around 0.9, other
+# people's human writing mostly 0.35-0.8, AI-drafted text mostly below 0.3. Upper bounds, checked in order.
+BANDS = [(0.3, "AI 味浓"), (0.5, "灰区"), (0.85, "像真人写的"), (float("inf"), "接近作者本人")]
+
+
+def band(p: float, bands: list[tuple[float, str]] = BANDS) -> str:
+    return next(label for upper, label in bands if p < upper)
+
+
+def parse_bands(spec: str) -> list[tuple[float, str]]:
+    """"0.3,0.5,0.85" -> BANDS with those three boundaries."""
+    cuts = [float(x) for x in spec.split(",")]
+    if len(cuts) != len(BANDS) - 1 or cuts != sorted(cuts):
+        raise ValueError(f"--bands needs {len(BANDS) - 1} increasing numbers, e.g. 0.3,0.5,0.85")
+    return [(c, label) for c, (_, label) in zip([*cuts, float("inf")], BANDS, strict=True)]
 
 
 @dataclass
@@ -39,6 +56,23 @@ class Detector:
                 "vocabulary": {k: int(v) for k, v in vec.vocabulary_.items()}, "idf": vec.idf_.tolist(),
                 "coef": lr.coef_[0].tolist(), "intercept": float(lr.intercept_[0])}
         Path(path).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    @classmethod
+    def bundled(cls) -> Detector:
+        """The released classifier that ships with the package (top 10,000 features, v1.1 data)."""
+        with resources.as_file(resources.files("voice_lora") / "data" / BUNDLED) as p:
+            return cls.load(p)
+
+    def prune(self, top: int) -> Detector:
+        """Keep the `top` features with the largest weights. On v1.1 data 10,000 of 667k features keep the
+        held-out AUC (0.965 vs 0.967) and shrink the saved file from 39 MB to 0.55 MB."""
+        vec, lr = self.clf.vec, self.clf.clf
+        coef = lr.coef_[0]
+        keep = np.argsort(-np.abs(coef))[:top]
+        inv = {i: t for t, i in vec.vocabulary_.items()}
+        clf = VoiceClassifier.from_state({inv[i]: n for n, i in enumerate(keep)}, vec.idf_[keep].tolist(),
+                                         coef[keep].tolist(), float(lr.intercept_[0]))
+        return Detector(clf, self.lexicon, self.author)
 
     @classmethod
     def load(cls, path: str | Path) -> Detector:
@@ -100,29 +134,49 @@ def check_table(rows: dict[str, dict]) -> str:
     return "\n".join(lines)
 
 
-def paragraphs(md: str) -> list[str]:
+def paragraphs(md: str, min_chars: int = MIN_PARAGRAPH) -> list[str]:
     """Prose paragraphs of a markdown article: no front matter, headings, quotes, tables, code or short blocks."""
     md = re.sub(r"\A---\n.*?\n---\n", "", md, flags=re.S)
-    return [b.plain.strip() for b in split_blocks(md) if b.rewrite and len(b.plain.strip()) >= MIN_PARAGRAPH]
+    return [b.plain.strip() for b in split_blocks(md) if b.rewrite and len(b.plain.strip()) >= min_chars]
 
 
-def score_files(det: Detector, files: list[str | Path]) -> list[dict]:
-    """P(author) per article (length-weighted mean over its prose paragraphs) and AI markers per 1,000
-    characters, sorted from most AI-like to most author-like. Files without prose are skipped."""
+def markers_in(text: str, lexicon: list[str]) -> list[str]:
+    return [g for g in lexicon if g in text]
+
+
+def score_files(det: Detector, files: list[str | Path], min_chars: int = MIN_PARAGRAPH, worst: int = 0,
+                bands: list[tuple[float, str]] = BANDS) -> list[dict]:
+    """P(author) per article (length-weighted mean over its prose paragraphs), its band, and AI markers per
+    1,000 characters, sorted from most AI-like to most author-like. With `worst`, each row also lists that many
+    lowest-scoring paragraphs and the AI markers they contain. Files without prose are skipped.
+
+    Read the article-level number; single paragraphs are noisy (half of other people's human paragraphs score
+    below 0.5)."""
     rows = []
     for f in files:
-        paras = paragraphs(Path(f).read_text(encoding="utf-8"))
+        paras = paragraphs(Path(f).read_text(encoding="utf-8"), min_chars)
         if not paras:
             continue
         p = det.clf.p_human(paras)
         w = np.array([len(t) for t in paras], dtype=float)
-        rows.append({"file": str(f), "p_author": float((p * w).sum() / w.sum()), "marker_rate": marker_rate(paras, det.lexicon),
-                     "paragraphs": len(paras), "chars": int(w.sum())})
+        pa = float((p * w).sum() / w.sum())
+        row = {"file": str(f), "p_author": pa, "band": band(pa, bands), "marker_rate": marker_rate(paras, det.lexicon),
+               "paragraphs": len(paras), "chars": int(w.sum())}
+        if worst:
+            row["worst"] = [{"p": float(p[i]), "text": paras[i], "markers": markers_in(paras[i], det.lexicon)}
+                            for i in np.argsort(p)[:worst]]
+        rows.append(row)
     rows.sort(key=lambda r: r["p_author"])
     return rows
 
 
-def score_table(rows: list[dict]) -> str:
-    lines = ["| P(作者) | AI 词/千字 | 段数 | 文件 |", "|---|---|---|---|"]
-    lines += [f"| {r['p_author']:.3f} | {r['marker_rate']:.2f} | {r['paragraphs']} | {r['file']} |" for r in rows]
+def score_table(rows: list[dict], author: str = "作者") -> str:
+    lines = [f"| 像{author}写的概率 | 判断 | AI 腔词/千字 | 段数 | 文件 |", "|---|---|---|---|---|"]
+    lines += [f"| {r['p_author']:.3f} | {r['band']} | {r['marker_rate']:.2f} | {r['paragraphs']} | {r['file']} |" for r in rows]
+    for r in rows:
+        if r.get("worst"):
+            lines += ["", f"{r['file']}：分数最低的段落"]
+            for x in r["worst"]:
+                hint = f"（AI 腔词：{'、'.join(x['markers'][:6])}）" if x["markers"] else ""
+                lines.append(f"- {x['p']:.2f} {x['text'][:80]}{'…' if len(x['text']) > 80 else ''}{hint}")
     return "\n".join(lines)

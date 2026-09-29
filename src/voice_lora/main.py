@@ -2,9 +2,9 @@
 
   voice-lora rewrite article.md --card model.yaml [--out out.md | --out-dir DIR]
   voice-lora compare article.md out.md [out2.md ...] [--classifier clf.json] [--out page.html]
-  voice-lora score a.md b.md ... --classifier clf.json [--json]
+  voice-lora score a.md b.md ... [--paragraphs 3] [--json]        (uses the bundled classifier unless --classifier)
   voice-lora card --config local/config.yaml --model <served id> --base-url http://localhost:1234/v1 [--out card.yaml]
-  voice-lora fit --config local/config.yaml --out clf.json
+  voice-lora fit --config local/config.yaml --out clf.json [--top-features 10000]
   voice-lora check --config local/config.yaml
 
 A model card (see card.example.yaml) says where a model is served and which instruction it was trained with;
@@ -37,14 +37,13 @@ def _card(args: argparse.Namespace) -> ModelCard:
     return ModelCard.from_config(load_config(args.config), args.serve_url, args.serve_model)
 
 
-def _detector(args: argparse.Namespace, required: bool = True) -> classify.Detector | None:
+def _detector(args: argparse.Namespace, bundled: bool = True) -> classify.Detector | None:
+    """--classifier file, else fit from --config, else the classifier shipped with the package."""
     if getattr(args, "classifier", None):
         return classify.Detector.load(args.classifier)
     if getattr(args, "config", None):
         return classify.fit(load_config(args.config))[0]
-    if required:
-        raise SystemExit("give --classifier (a saved classifier) or --config (fit one from a run)")
-    return None
+    return classify.Detector.bundled() if bundled else None
 
 
 def cmd_rewrite(args: argparse.Namespace) -> None:
@@ -68,7 +67,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     names = args.names or [Path(p).stem.removeprefix(original.stem + ".") for p in args.rewritten]
     if len(names) != len(args.rewritten):
         raise SystemExit("--names needs one name per rewritten file")
-    det = _detector(args, required=False)
+    det = _detector(args, bundled=not args.no_classifier)
     columns = [(n, load_log(p)) for n, p in zip(names, args.rewritten, strict=True)]
     try:
         page, stats = compare_page(original.read_text(encoding="utf-8"), columns, det, args.title,
@@ -81,8 +80,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
 
 def cmd_score(args: argparse.Namespace) -> None:
-    rows = classify.score_files(_detector(args), args.files)
-    print(json.dumps(rows, ensure_ascii=False, indent=2) if args.json else classify.score_table(rows))
+    det = _detector(args)
+    try:
+        bands = classify.parse_bands(args.bands) if args.bands else classify.BANDS
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    rows = classify.score_files(det, args.files, args.min_paragraph, args.paragraphs, bands)
+    print(json.dumps(rows, ensure_ascii=False, indent=2) if args.json else classify.score_table(rows, det.author))
 
 
 def cmd_check(args: argparse.Namespace) -> None:
@@ -92,6 +96,8 @@ def cmd_check(args: argparse.Namespace) -> None:
 
 def cmd_fit(args: argparse.Namespace) -> None:
     det, _, _ = classify.fit(load_config(args.config))
+    if args.top_features:
+        det = det.prune(args.top_features)
     det.save(args.out)
     print(json.dumps({"out": args.out, "features": len(det.clf.vec.vocabulary_), "lexicon": len(det.lexicon)}, ensure_ascii=False))
 
@@ -129,17 +135,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("original")
     p.add_argument("rewritten", nargs="+", help="rewritten .md files (their .blocks.jsonl logs must sit next to them)")
     p.add_argument("--names", nargs="+", help="column names (default: the last suffix of each file name)")
-    p.add_argument("--classifier", help="saved classifier (JSON) for scores and AI-marker highlights")
+    p.add_argument("--classifier", help="saved classifier (JSON) for scores and AI-marker highlights (default: the bundled one)")
     p.add_argument("--config", help="fit the classifier from this run instead")
+    p.add_argument("--no-classifier", action="store_true", help="no scores or highlights")
     p.add_argument("--author", help="author name on the page (default: from the classifier)")
     p.add_argument("--title")
     p.add_argument("--out", help="default: <first rewritten>.compare.html")
     p.set_defaults(func=cmd_compare)
 
-    p = sub.add_parser("score", help="P(author) and AI markers per article")
+    p = sub.add_parser("score", help="how AI-like each markdown article reads (P(author), band, AI markers)")
     p.add_argument("files", nargs="+")
-    p.add_argument("--classifier", help="saved classifier (JSON)")
+    p.add_argument("--classifier", help="saved classifier (JSON); default: the one shipped with the package")
     p.add_argument("--config", help="fit the classifier from this run instead")
+    p.add_argument("--paragraphs", type=int, default=0, metavar="K", help="also list the K lowest-scoring paragraphs of each article")
+    p.add_argument("--min-paragraph", type=int, default=classify.MIN_PARAGRAPH, help="ignore prose blocks shorter than this (characters)")
+    p.add_argument("--bands", help="band boundaries, default 0.3,0.5,0.85 (AI 味浓 / 灰区 / 像真人写的 / 接近作者本人)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_score)
 
@@ -150,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("fit", help="fit the classifier from a run and save it as JSON")
     p.add_argument("--config", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--top-features", type=int, help="keep only the N strongest features (10000 keeps accuracy at 1/70 the size)")
     p.set_defaults(func=cmd_fit)
 
     p = sub.add_parser("card", help="write a model card from the training config")

@@ -4,6 +4,17 @@ voice-lora 用作者自己写的中文文章，训练一个把 AI 写的中文�
 
 在作者本人的中文博客案例（187 篇、2,313 个段落）中，基于 Qwen3.5-9B-Base 训练的 bf16 LoRA（单张 RTX 5090 训练 14 分钟），留出段落上“像作者写的”分类器概率达到 0.87（AI 输入为 0.18，检索 8 段原文作例子的基线为 0.33，作者原文本身为 0.86）。在作者本人对 20 段模型输出的盲评里，16 段被判为“是我写的”（作者自己的真原文认出 17 段），和基线二选一时模型胜 14/20。
 
+### 附带发布：中文 AI 味评分器
+
+仓库随包发布一个 0.55 MB 的文风分类器（以鸭哥的文风为参照）。装好本仓库就能给任意中文 markdown 文章打分：
+
+```bash
+uv pip install git+https://github.com/grapeot/voice-lora
+voice-lora score article.md --paragraphs 3
+```
+
+在 2022 年前其他作者的真人博客与 5 家模型（其中 3 家训练时没见过）写的同题文章之间，文章级 AUC 为 0.93–0.98。测试、分档和局限见[模型卡](docs/classifier.md)；给 agent 用的 skill 在 `skills/voice-lora-detect/SKILL.md`。
+
 ## 为什么需要
 
 AI 起草的中文有明显的腔调：用词端着、爱加铺垫和总结、英文术语全译成中文。
@@ -128,9 +139,9 @@ cp config.example.yaml local/config.yaml
 voice-lora card --config local/config.yaml --model <服务端模型 id> --base-url http://localhost:1234/v1 --out my-model.yaml
 
 voice-lora rewrite article.md --card my-model.yaml --out-dir out/         # 改写，写出 .md 和逐段日志 .blocks.jsonl
-voice-lora compare article.md out/article.<name>.md --classifier clf.json  # 原稿与改写逐段并排的 HTML
-voice-lora fit --config local/config.yaml --out clf.json                   # 把分类器存成 JSON（不用 pickle）
-voice-lora score *.md --classifier clf.json                                # 每篇文章的 P(作者) 与 AI 腔词率
+voice-lora compare article.md out/article.<name>.md                        # 原稿与改写逐段并排的 HTML
+voice-lora score *.md [--paragraphs 3]                                     # 每篇文章的 P(作者)、判断与 AI 腔词率（默认用随包分类器）
+voice-lora fit --config local/config.yaml --out clf.json --top-features 10000   # 用自己的数据训分类器，存成 JSON（不用 pickle）
 voice-lora check --config local/config.yaml                                # 分类器可信度（见 docs/classifier.md）
 ```
 
@@ -161,7 +172,7 @@ skills/voice-lora/SKILL.md
 本开源仓库仅包含流程代码与工程脚本：
 - 不包含作者的文章语料。
 - 不包含合成的训练数据。
-- 不包含训练出的模型权重。
+- 不包含训练出的模型权重（文风分类器除外，见 `src/voice_lora/data/` 和模型卡）。
 
 所有生成数据与模型输出默认落在 git 忽略的 `local/` 目录中。
 
