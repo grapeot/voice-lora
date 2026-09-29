@@ -7,6 +7,7 @@
 Writes <workdir>/runs/<run>/{args.json, log.jsonl, checkpoint-*/, final/}.
 """
 import json
+import random
 import time
 
 import _bootstrap  # noqa: F401
@@ -63,7 +64,11 @@ def main() -> None:
         return Dataset.from_dict({"text": [tokenizer.apply_chat_template(r["messages"], tokenize=False, enable_thinking=False) for r in rows]})
 
     train_ds = render(jsonl.read(cfg.work("sft_train.jsonl")))
-    val_ds = render(jsonl.read(cfg.work("sft_val.jsonl")))
+    val_rows = jsonl.read(cfg.work("sft_val.jsonl"))
+    if t.get("val_max_samples") and len(val_rows) > t["val_max_samples"]:
+        # The validation loss only locates the minimum; a fixed random subset is enough and makes each eval cheap.
+        val_rows = random.Random(0).sample(val_rows, int(t["val_max_samples"]))
+    val_ds = render(val_rows)
     print("example:\n" + train_ds[0]["text"], flush=True)
     steps_per_epoch = max(1, len(train_ds) // (t["batch"] * t["grad_accum"]))
     save_steps = max(10, int(steps_per_epoch * t.get("save_every", 0.25)))

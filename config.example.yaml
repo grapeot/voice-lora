@@ -80,6 +80,7 @@ train:
   grad_accum: 4
   max_seq: 2048
   save_every: 0.25
+  val_max_samples: 300           # 验证集只抽这么多条算 loss：它只用来找最低点，全量评估每次要多花半分钟
 
 evaluate:
   articles:                      # 端到端评估：真正想改写的 AI 文章，逐段送进模型
