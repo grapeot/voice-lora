@@ -110,6 +110,7 @@ v1 的真实过程举个例子：
 - **整篇并发和逐段串行效果一样。** 串行模式把上一段的输出作为上文，更贴近训练；并发模式用上一段的 AI 原文作为上文。v1 实测两者 P(作者) 0.29 对 0.32，差别在噪声内，默认用并发。
 - **盲评有天花板。** 作者也只认出了 17/20 段自己的真原文。"判为作者写的"达到 80% 就已经接近上限，别把 100% 当目标，也别从作者判错的单条里读出太多东西。
 - **重复惩罚要覆盖整个 prompt，别用 greedy。** 改写靠采样（temperature 0.7、top_p 0.95、重复惩罚 1.05）；greedy 下模型大多在照抄输入。要改写的原文就在 prompt 里，重复惩罚压低照抄的概率，是模型肯换说法的主要原因。vLLM 的惩罚默认覆盖全部 prompt；llama.cpp 默认只看最近 64 个 token，要在请求里带 `repeat_last_n`（同样的段落，和原文的相似度 0.849 对比覆盖全文时的 0.784）。LM Studio 既不认 `repetition_penalty`，也不传 `repeat_last_n`，所以 GGUF 要用 `llama-server` 部署。`voice-lora rewrite` 的请求体已经处理好这些。换部署后，先用 `--temperature 0 --repetition-penalty 1.0 --no-guard` 在两边各跑同一篇文章逐字对比（Q8_0 和 bf16 在 40 段里有 25 段逐字相同），再用默认参数比较和原文的平均相似度。
+- **发布前检查 GGUF 的元数据。** 早期导出的文件里，`general.name` 是合并时临时目录的随机名，读取模型的工具都会显示它。`14_export_gguf.sh` 现在默认用输出文件名，也可以用第 5 个参数指定。已经导出的文件，用 `gguf` 包的 `gguf-new-metadata --general-name` 改名，不用重新转换。改完用同样的 greedy 对比确认权重没变。
 - **GGUF 转换时报 `TokenizersBackend does not exist`。** 合并权重是 transformers 5.x 存的，转换环境里的 transformers 也要 ≥ 5.5。
 - **远端杀进程别用 `pkill -f`，也别在同一条命令里既 grep 进程又提到它的名字。** 通过 ssh 执行时，模式串会匹配到这条 ssh 会话自己的命令行（`grep "[x]yz"` 只能避开 grep 本身，避不开同一条命令里别处出现的 `xyz`），把会话一起杀掉。先单独查出 PID，再单独 kill。
 - **等待远端长任务时，等待条件要同时覆盖失败。** 只等成功标志的循环，在任务崩溃时会空转；v1 因此空等了一整夜。

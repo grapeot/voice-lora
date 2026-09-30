@@ -4,6 +4,10 @@ voice-lora 用作者自己写的中文文章，训练一个把 AI 写的中文�
 
 在作者本人的中文博客案例（187 篇、2,313 个段落）中，基于 Qwen3.5-9B-Base 训练的 bf16 LoRA（单张 RTX 5090 训练 14 分钟），留出段落上“像作者写的”分类器概率达到 0.87（AI 输入为 0.18，检索 8 段原文作例子的基线为 0.33，作者原文本身为 0.86）。在作者本人对 20 段模型输出的盲评里，16 段被判为“是我写的”（作者自己的真原文认出 17 段），和基线二选一时模型胜 14/20。
 
+### 已发布：鸭哥文风改写模型 ai_smell_remover
+
+v1.1 模型以 Q8_0 GGUF 发布在 Hugging Face：[grapeot/ai_smell_remover](https://huggingface.co/grapeot/ai_smell_remover)。用 llama.cpp 的 `llama-server` 起服务，再用本仓库的 `voice-lora rewrite` 改文章。完整步骤、采样参数和改完之后必须做的事实核查，见 `skills/voice-lora-rewrite/SKILL.md`。目前只在 Mac 上测试过，llama.cpp 支持的其他平台应该可以直接用。
+
 ### 附带发布：中文 AI 味评分器
 
 仓库随包发布一个 0.55 MB 的文风分类器（以鸭哥的文风为参照）。装好本仓库就能给任意中文 markdown 文章打分：
@@ -135,7 +139,7 @@ cp config.example.yaml local/config.yaml
 训练流水线之外的日常使用走一个命令行工具（`uv pip install -e .` 后可用），不依赖实验工作目录：
 
 ```bash
-# 模型卡：从训练用的 config 生成，保证 prompt 里的指令和训练时一致（格式见 card.example.yaml）
+# 调用卡：从训练用的 config 生成，保证 prompt 里的指令和训练时一致（格式见 card.example.yaml）
 voice-lora card --config local/config.yaml --model <服务端模型 id> --base-url http://localhost:1234/v1 --out my-model.yaml
 
 voice-lora rewrite article.md --card my-model.yaml --out-dir out/         # 改写，写出 .md 和逐段日志 .blocks.jsonl
@@ -172,7 +176,7 @@ skills/voice-lora/SKILL.md
 本开源仓库仅包含流程代码与工程脚本：
 - 不包含作者的文章语料。
 - 不包含合成的训练数据。
-- 不包含训练出的模型权重（文风分类器除外，见 `src/voice_lora/data/` 和模型卡）。
+- 不包含训练出的模型权重。改写模型发布在 Hugging Face（见上文）；文风分类器随 Python 包分发，见 `src/voice_lora/data/` 和模型卡。
 
 所有生成数据与模型输出默认落在 git 忽略的 `local/` 目录中。
 
